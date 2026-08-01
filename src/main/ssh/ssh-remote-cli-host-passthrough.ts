@@ -23,6 +23,8 @@ import {
   ORCHESTRATION_COMPATIBILITY_HOST_INCARNATION_ENV,
   ORCHESTRATION_COMPATIBILITY_HOST_KIND_ENV
 } from '../../shared/orchestration-compatibility-evidence'
+import { propagateManagedRuntimeProfile } from '../runtime/managed-execution/authorization'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 
 export type SshCliRuntimeAuthority = {
   kind: 'ssh'
@@ -68,6 +70,7 @@ export type HostCliPassthroughOptions = {
   spawn?: typeof nodeSpawn
   entryExists?: (path: string) => boolean
   killTimeoutMs?: number
+  runtimeProfile?: OrcaRuntimeProfile
 }
 
 /** Thrown when the host CLI entry cannot be launched at all; callers fall back
@@ -215,13 +218,16 @@ export async function runHostOrcaCliPassthrough(
     throw new HostCliUnavailableError(`Orca CLI entry not found at ${cliEntryPath}`)
   }
 
-  const env = buildHostCliEnv({
-    hostEnv,
-    remoteEnv: request.env,
-    userDataPath,
-    remoteCwd: request.cwd,
-    runtimeAuthority: request.runtimeAuthority
-  })
+  const env = propagateManagedRuntimeProfile(
+    buildHostCliEnv({
+      hostEnv,
+      remoteEnv: request.env,
+      userDataPath,
+      remoteCwd: request.cwd,
+      runtimeAuthority: request.runtimeAuthority
+    }),
+    options.runtimeProfile ?? getProcessRuntimeProfile()
+  )
 
   return await new Promise<RemoteOrcaCliResult>((resolve, reject) => {
     let settled = false

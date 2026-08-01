@@ -20,6 +20,10 @@ import {
   buildAgentFeatureSkillInstallArgs,
   buildAgentFeatureSkillUpdateArgs
 } from '../../shared/agent-feature-install-commands'
+import {
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  resolveOrcaRuntimeProfile
+} from '../../shared/runtime-profile'
 
 type BundledSkillGuide = {
   name: string
@@ -64,6 +68,18 @@ function requireTopic(
 
 function writeStdout(value: string): void {
   process.stdout.write(value.endsWith('\n') ? value : `${value}\n`)
+}
+
+function assertCliOrchestrationSkillDeliveryAllowed(skillNames: readonly string[]): void {
+  if (
+    resolveOrcaRuntimeProfile(process.env) === MANAGED_ORCA_RUNTIME_PROFILE &&
+    skillNames.includes('orchestration')
+  ) {
+    throw new RuntimeClientError(
+      'managed_execution_authorization_required',
+      'Managed execution cannot perform orchestration skill delivery without an external control-plane authorization.'
+    )
+  }
 }
 
 function resolveSelectedSkillNames(
@@ -312,13 +328,16 @@ function createSkillMutationHandler(verb: SkillMutationVerb): CommandHandler {
       )
     }
 
+    // Why: a managed worker inherits ORCA_RUNTIME_PROFILE from its spawning
+    // main-process path. Resolve it in this standalone CLI process before npx
+    // can install or update the orchestration bundle.
+    assertCliOrchestrationSkillDeliveryAllowed(skillNames)
     // Why: stdio is inherited for the child below, so this status line must go to
     // stderr — stdout is npx's own output, not this command's JSON channel.
     process.stderr.write(`Running: ${command}\n`)
     process.exitCode = await runNpxSkills(npxArgs)
   }
 }
-
 export const SKILL_HANDLERS: Record<string, CommandHandler> = {
   'skills list': async ({ json }) => {
     // Why: the embedded guide table is large, so unrelated CLI commands must not

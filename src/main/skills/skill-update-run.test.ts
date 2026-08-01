@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SkillUpdateRun } from '../../shared/skill-freshness'
+import { setProcessRuntimeProfile } from '../runtime/runtime-profile'
 import {
   getSpawnArgsForWindows,
   WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
@@ -46,6 +47,10 @@ async function flush(): Promise<void> {
 }
 
 describe('SkillUpdateRunner', () => {
+  afterEach(() => {
+    setProcessRuntimeProfile('default')
+  })
+
   it('passes both non-interactive flags and the sorted skill names', () => {
     const { runner, spawnCalls } = makeRunner()
 
@@ -62,6 +67,16 @@ describe('SkillUpdateRunner', () => {
       '--global',
       '-y'
     ])
+  })
+
+  it('rejects orchestration delivery in managed mode before the npx spawn', () => {
+    setProcessRuntimeProfile('managed')
+    const { runner, spawnCalls } = makeRunner()
+
+    expect(() => runner.start(['orchestration', 'orca-cli'])).toThrow(
+      'external control-plane authorization'
+    )
+    expect(spawnCalls).toHaveLength(0)
   })
 
   it('ignores stdin so the CLI sees a non-TTY', () => {

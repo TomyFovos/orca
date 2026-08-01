@@ -13,6 +13,10 @@ import {
 } from 'electron'
 export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-ready'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import {
+  assertManagedExecutionAuthorized,
+  propagateManagedRuntimeProfile
+} from '../runtime/managed-execution/authorization'
 import type { Store } from '../persistence'
 import type { GlobalSettings, TuiAgent } from '../../shared/types'
 import { toSshExecutionHostId } from '../../shared/execution-host'
@@ -4060,6 +4064,7 @@ export function registerPtyHandlers(
       }
       deleteRequestedEnvKeys(env, spawnOptions.envToDelete)
       promoteAgentTeamsShimPath(env, requestedAgentTeamsPath)
+      spawnOptions.env = propagateManagedRuntimeProfile(env)
       if (launchCommand !== undefined) {
         spawnOptions.command = launchCommand
       }
@@ -4924,6 +4929,11 @@ export function registerPtyHandlers(
         }
       }
     ) => {
+      if (isTuiAgent(args.launchAgent)) {
+        // Why: raw terminal commands remain available, but structured agent starts
+        // must originate from a future external-control-plane authorization.
+        assertManagedExecutionAuthorized('target CLI startup')
+      }
       const spawnTiming = createPtySpawnTiming()
       const startupPromise = getLocalPtyStartupPromise(args.connectionId)
       if (startupPromise) {
@@ -5255,11 +5265,12 @@ export function registerPtyHandlers(
       }
       deleteRequestedEnvKeys(spawnEnv, combinedEnvToDelete)
       promoteAgentTeamsShimPath(spawnEnv, requestedAgentTeamsPath)
+      const propagatedSpawnEnv = propagateManagedRuntimeProfile(spawnEnv)
       const spawnOptions: PtySpawnOptions = {
         cols: args.cols,
         rows: args.rows,
         cwd,
-        env: spawnEnv,
+        env: propagatedSpawnEnv,
         ...(isMintedSessionId ? { isNewSession: true } : {})
       }
       if (!args.connectionId && !isDaemonHostSpawn) {

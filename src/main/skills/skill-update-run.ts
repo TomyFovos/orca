@@ -7,6 +7,7 @@ import {
 import { resolveCliCommand } from '../codex-cli/command'
 import { killWithDescendantSweep } from '../pty-descendant-termination'
 import { getSpawnArgsForWindows, WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL } from '../win32-utils'
+import { assertManagedExecutionSkillDeliveryAllowed } from '../runtime/managed-execution/authorization'
 
 // Why: `skills update` prints ANSI colour and \r + erase-line progress. We show
 // this log verbatim to the user but never parse it — `update` has no --json
@@ -88,6 +89,10 @@ export class SkillUpdateRunner {
     if (!canonicalNames) {
       return { started: false, reason: 'invalid-names' }
     }
+    // Why: only the orchestration bundle is prohibited in managed mode. Other
+    // skill maintenance remains available and this check occurs before npx can
+    // write any global agent installation.
+    assertManagedExecutionSkillDeliveryAllowed(canonicalNames, 'orchestration skill update')
 
     const resolveCommand = this.deps.resolveCommand ?? ((name: string) => resolveCliCommand(name))
     const spawnProcess = this.deps.spawnProcess ?? spawn

@@ -9,6 +9,7 @@ import { OrcaRuntimeService } from '../../orca-runtime'
 import type { RuntimeTerminalSummary } from '../../../../shared/runtime-types'
 import { ORCHESTRATION_ASK_MAX_TIMEOUT_MS } from '../../../../shared/orchestration-ask-timeout'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
+import { setProcessRuntimeProfile } from '../../runtime-profile'
 
 function lifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
   return `${type} messages belong to one exact Dispatch and cannot target a group address.`
@@ -53,6 +54,7 @@ describe('orchestration RPC methods', () => {
   }
 
   afterEach(() => {
+    setProcessRuntimeProfile('default')
     if (!dbOpen) {
       return
     }
@@ -1747,6 +1749,28 @@ describe('orchestration RPC methods', () => {
       expect(db.getTask(result.task.id)?.display_name).toBe('Implement feature X')
     })
 
+    it('rejects real Task and Dispatch mutations in managed mode', async () => {
+      setup()
+      const existing = db.createTask({ spec: 'must remain ready' })
+      setProcessRuntimeProfile('managed')
+
+      await expect(
+        call('orchestration.taskCreate', { spec: 'must not create' })
+      ).rejects.toMatchObject({
+        code: 'managed_execution_authorization_required'
+      })
+      await expect(
+        call('orchestration.taskUpdate', { id: existing.id, status: 'completed' })
+      ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
+      await expect(
+        call('orchestration.dispatch', { task: existing.id, to: 'term_worker' })
+      ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
+
+      expect(db.listTasks()).toHaveLength(1)
+      expect(db.getTask(existing.id)?.status).toBe('ready')
+      expect(db.getDispatchContext(existing.id)).toBeUndefined()
+    })
+
     it('creates a task with deps', async () => {
       setup()
       const t1 = db.createTask({ spec: 'first' })
@@ -2194,6 +2218,25 @@ describe('orchestration RPC methods', () => {
         'term_worker',
         expect.stringContaining('--dispatch-capability dcap_')
       )
+    })
+
+    it('rejects a real worker start before any terminal side effect in managed mode', async () => {
+      setup()
+      mockCurrentWorkerStart()
+      const task = db.createTask({ spec: 'must not fan out' })
+      setProcessRuntimeProfile('managed')
+
+      await expect(
+        call('orchestration.workerStart', {
+          task: task.id,
+          from: 'term_coord',
+          agent: 'codex'
+        })
+      ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
+
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+      expect(db.getTask(task.id)?.status).toBe('ready')
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
     })
 
     it('commits the launched worker token with its durable authority', async () => {

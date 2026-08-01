@@ -83,7 +83,9 @@ export async function runRemoteOrcaCli(
 
   let passthroughFailure: HostCliUnavailableError | null = null
   try {
-    return await runHostOrcaCliPassthrough(request, passthroughOptions)
+    // Why: remote CLI commands execute in a host child process. Preserve the
+    // fixed profile there so a managed remote worker cannot re-enter default.
+    return await runHostOrcaCliPassthrough(request, { ...passthroughOptions, runtimeProfile })
   } catch (err) {
     if (!(err instanceof HostCliUnavailableError)) {
       throw err

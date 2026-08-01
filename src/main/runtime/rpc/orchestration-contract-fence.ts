@@ -7,6 +7,7 @@ import {
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
 import type { RpcEnvelopeMeta, RpcRequest, RpcResponse } from './core'
 import { errorResponse } from './errors'
+import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runtime-profile'
 
 export function orchestrationMigrationFence(
   request: RpcRequest,
@@ -31,6 +32,10 @@ export function orchestrationMigrationFence(
     meta,
     'orchestration_migration_required',
     'This orchestration mutation uses an obsolete contract. No effects were applied.',
-    orchestrationMigrationData(reason)
+    orchestrationMigrationData(reason, {
+      // Why: even a recovery hint can become an unauthorized skill-delivery
+      // route when it tells a managed worker to fetch orchestration.
+      includeSkillRecovery: getProcessRuntimeProfile() !== MANAGED_ORCA_RUNTIME_PROFILE
+    })
   )
 }

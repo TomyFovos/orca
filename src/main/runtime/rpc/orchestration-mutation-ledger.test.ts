@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from '../orchestration/db'
+import { setProcessRuntimeProfile } from '../runtime-profile'
 import { defineMethod, type RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
 import { ORCHESTRATION_METHODS } from './methods/orchestration'
@@ -33,6 +34,7 @@ describe('durable orchestration mutation ledger', () => {
   const paths: string[] = []
 
   afterEach(() => {
+    setProcessRuntimeProfile('default')
     for (const path of paths.splice(0)) {
       rmSync(path, { recursive: true, force: true })
     }
@@ -77,6 +79,24 @@ describe('durable orchestration mutation ledger', () => {
     })
     expect(effect).toHaveBeenCalledTimes(1)
     expect(db.getInbox(10)).toHaveLength(1)
+    db.close()
+  })
+
+  it('rejects a managed mutation through the real dispatcher before a receipt or effect', async () => {
+    const { db, dispatcher, effect } = createHarness()
+    setProcessRuntimeProfile('managed')
+
+    const result = await dispatcher.dispatch(
+      request({ rpcId: 'rpc_managed', mutationId: 'mutation_managed', subject: 'blocked' })
+    )
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: { code: 'managed_execution_authorization_required' }
+    })
+    expect(effect).not.toHaveBeenCalled()
+    const callerFingerprint = createHash('sha256').update('caller-token').digest('hex')
+    expect(db.getMutationReceipt(callerFingerprint, 'mutation_managed')).toBeUndefined()
     db.close()
   })
 

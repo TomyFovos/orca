@@ -25,6 +25,14 @@ export async function ensureClaudeAgentTeamsShimDir(root = defaultShimRoot()): P
   return root
 }
 
+export function isClaudeAgentTeamsLaunchRequested(args: {
+  command?: string
+  mode?: ClaudeAgentTeamsMode
+}): boolean {
+  const mode = args.mode ?? 'off'
+  return Boolean(args.command && mode !== 'off' && isDirectClaudeCommand(args.command))
+}
+
 export async function buildClaudeAgentTeamsLaunchPlan(args: {
   command: string | undefined
   mode: ClaudeAgentTeamsMode | undefined
@@ -32,12 +40,13 @@ export async function buildClaudeAgentTeamsLaunchPlan(args: {
   createTeamEnv: (shimDir: string, shimBin: string) => Record<string, string>
 }): Promise<ClaudeAgentTeamsLaunchPlan | null> {
   const mode = args.mode ?? 'off'
-  if (!args.command || mode === 'off' || !isDirectClaudeCommand(args.command)) {
+  const command = args.command
+  if (!command || !isClaudeAgentTeamsLaunchRequested(args)) {
     return null
   }
   if (mode === 'in-process' || process.platform === 'win32') {
     return {
-      command: addClaudeTeammateModeInProcess(args.command),
+      command: addClaudeTeammateModeInProcess(command),
       env: { CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: '1' }
     }
   }
@@ -45,7 +54,7 @@ export async function buildClaudeAgentTeamsLaunchPlan(args: {
   const shimBin = resolveClaudeAgentTeamsShimBin(args.baseEnv)
   const env = args.createTeamEnv(shimDir, shimBin)
   return {
-    command: addClaudeTeammateModeAuto(args.command),
+    command: addClaudeTeammateModeAuto(command),
     env,
     envToDelete: ['TERM_PROGRAM', 'ORCA_ATTRIBUTION_SHIM_DIR']
   }

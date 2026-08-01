@@ -239,6 +239,7 @@ import {
   isHiddenRendererPty
 } from './pty-hidden-delivery-gate'
 import { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { setProcessRuntimeProfile } from '../runtime/runtime-profile'
 import { hasLiveClaudePtys, markClaudePtySpawned } from '../claude-accounts/live-pty-gate'
 import * as livePtyGate from '../claude-accounts/live-pty-gate'
 import {
@@ -472,6 +473,7 @@ describe('registerPtyHandlers', () => {
   })
 
   afterEach(() => {
+    setProcessRuntimeProfile('default')
     _resetLocalPtyProviderStateForTest()
     _resetWslCachesForTests()
     vi.useRealTimers()
@@ -1723,6 +1725,36 @@ describe('registerPtyHandlers', () => {
     it('defaults LANG to en_US.UTF-8 when not inherited from process.env', async () => {
       const env = await spawnAndGetEnv(undefined, { LANG: undefined })
       expect(env.LANG).toBe('en_US.UTF-8')
+    })
+
+    it('propagates the managed profile to spawned PTYs', async () => {
+      setProcessRuntimeProfile('managed')
+
+      const env = await spawnAndGetEnv()
+
+      expect(env.ORCA_RUNTIME_PROFILE).toBe('managed')
+    })
+
+    it('does not inject a runtime profile into default PTYs', async () => {
+      const env = await spawnAndGetEnv(undefined, { ORCA_RUNTIME_PROFILE: undefined })
+
+      expect(env.ORCA_RUNTIME_PROFILE).toBeUndefined()
+    })
+
+    it('rejects a structured target CLI start in the managed profile', async () => {
+      setProcessRuntimeProfile('managed')
+      handlers.clear()
+      registerPtyHandlers(mainWindow as never)
+
+      await expect(
+        handlers.get('pty:spawn')!(null, {
+          cols: 80,
+          rows: 24,
+          launchAgent: 'codex'
+        })
+      ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
+
+      expect(spawnMock).not.toHaveBeenCalled()
     })
 
     it('inherits LANG from process.env when already set', async () => {
