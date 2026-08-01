@@ -40,6 +40,7 @@ import {
   getSshPtyProvider
 } from './pty'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import {
   initializeSshConnectionGenerationSession,
   resetSshConnectionGenerations
@@ -61,6 +62,7 @@ let advertisedUrlWatcherUnsubscribe: (() => void) | null = null
 let powerMonitorUnsubscribe: (() => void) | null = null
 let currentGetMainWindow: () => BrowserWindow | null = () => null
 let currentRuntime: OrcaRuntimeService | undefined
+let currentRuntimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
 
 const SSH_IPC_CHANNELS = [
   'ssh:listTargets',
@@ -794,7 +796,8 @@ function refreshActiveRelaySessions(): void {
       persistedStore,
       portForwardManager,
       currentRuntime,
-      broadcastDetectedPortsFromCurrentWindow
+      broadcastDetectedPortsFromCurrentWindow,
+      currentRuntimeProfile
     )
     configureRelaySessionCallbacks(session)
   }
@@ -803,7 +806,8 @@ function refreshActiveRelaySessions(): void {
 export function registerSshHandlers(
   store: Store,
   getMainWindow: () => BrowserWindow | null,
-  runtime?: OrcaRuntimeService
+  runtime?: OrcaRuntimeService,
+  runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
 ): { connectionManager: SshConnectionManager; sshStore: SshConnectionStore } {
   initializeSshConnectionGenerationSession()
   // Why: macOS re-activation re-calls this with a new BrowserWindow; ipcMain.handle() throws on a duplicate channel, so remove prior handlers first.
@@ -813,6 +817,7 @@ export function registerSshHandlers(
 
   currentGetMainWindow = getMainWindow
   currentRuntime = runtime
+  currentRuntimeProfile = runtimeProfile
   sshStore = new SshConnectionStore(store)
   persistedStore = store
   registerAdvertisedUrlRefresh(getCurrentMainWindow)
@@ -1021,7 +1026,8 @@ export function registerSshHandlers(
       persistedStore!,
       portForwardManager!,
       currentRuntime,
-      broadcastDetectedPortsFromCurrentWindow
+      broadcastDetectedPortsFromCurrentWindow,
+      currentRuntimeProfile
     )
     configureRelaySessionCallbacks(session)
     activeSessions.set(targetId, session)

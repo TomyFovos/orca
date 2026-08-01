@@ -4,7 +4,8 @@ import {
   InvalidOrcaRuntimeProfileError,
   MANAGED_ORCA_RUNTIME_PROFILE,
   ORCA_RUNTIME_PROFILE_ENV,
-  resolveOrcaRuntimeProfile
+  resolveOrcaRuntimeProfile,
+  resolveOrcaRuntimeProfileAtStartup
 } from './runtime-profile'
 
 describe('resolveOrcaRuntimeProfile', () => {
@@ -27,4 +28,17 @@ describe('resolveOrcaRuntimeProfile', () => {
       )
     }
   )
+
+  it('delegates an invalid startup profile to the fail-closed handler', () => {
+    const failClosed = (error: InvalidOrcaRuntimeProfileError): never => {
+      throw error
+    }
+
+    expect(() =>
+      resolveOrcaRuntimeProfileAtStartup(
+        { [ORCA_RUNTIME_PROFILE_ENV]: 'managed-preview' },
+        failClosed
+      )
+    ).toThrow(InvalidOrcaRuntimeProfileError)
+  })
 })

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import { readOrchestrationCompatibilityEvidence } from '../../shared/orchestration-compatibility-evidence'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../shared/protocol-version'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import type { RpcResponse } from '../runtime/rpc/core'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
 import type {
@@ -17,6 +18,7 @@ export async function acknowledgeRemoteOrcaCliPostOutput(
     postOutput: RemoteOrcaCliPostOutput
     env: Record<string, string>
     runtimeAuthority?: RemoteOrcaCliRequest['runtimeAuthority']
+    runtimeProfile?: OrcaRuntimeProfile
   }
 ): Promise<void> {
   const inheritedEvidence = readOrchestrationCompatibilityEvidence(args.env)
@@ -39,7 +41,10 @@ export async function acknowledgeRemoteOrcaCliPostOutput(
             answerMessageId: args.postOutput.answerMessageId
           })
         }
-  const response = await new RpcDispatcher({ runtime }).dispatch({
+  const response = await new RpcDispatcher({
+    runtime,
+    profile: args.runtimeProfile ?? DEFAULT_ORCA_RUNTIME_PROFILE
+  }).dispatch({
     id: `remote-cli-post-output-${randomUUID()}`,
     authToken: 'remote-cli',
     method: 'orchestration.check',

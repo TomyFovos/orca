@@ -9,6 +9,9 @@ import {
 } from './orchestration-mutation-executor'
 import { OrchestrationLegacyCompatibility } from './orchestration-legacy-compatibility'
 
+// Why: managed dispatch intentionally supplies none of these legacy fields, including
+// authenticatedCallerFingerprint, orchestrationCapability, and recordMutationReceipt. A method
+// using any field for authorization must explicitly design and review its managed-profile semantics.
 export type OrchestrationDispatchContext = Pick<
   RpcContext,
   | 'orchestrationCapability'

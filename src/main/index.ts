@@ -66,6 +66,7 @@ import { initOnboardingCohortClassifier } from './telemetry/onboarding-cohort-cl
 import { resolveConsent } from './telemetry/consent'
 import { triggerStartupNotificationRegistration } from './ipc/notifications'
 import { OrcaRuntimeService, type RuntimeWorktreeLifecycleEvent } from './runtime/orca-runtime'
+import { resolveOrcaRuntimeProfileAtStartup } from './runtime/runtime-profile'
 import { loadAgentSessionClaimSigner } from './runtime/agent-session-claim-identity'
 import {
   fingerprintOrchestrationPeer,
@@ -371,6 +372,13 @@ let localPtyStartupReady: Promise<void> = Promise.resolve()
 let localPtyProviderStartupReady: Promise<void> = Promise.resolve()
 const AGENT_STATE_CRASH_BREADCRUMB_MIN_INTERVAL_MS = 30_000
 const isServeMode = process.argv.includes('--serve')
+// Why: the runtime profile is a process-wide policy boundary, so reject an invalid supplied
+// value before PTY, IPC, or RPC initialization can expose a less-restricted path.
+const runtimeProfile = resolveOrcaRuntimeProfileAtStartup(process.env, (error) => {
+  console.error(error.message)
+  app.exit(1)
+  throw error
+})
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
@@ -1330,7 +1338,8 @@ function openMainWindow(): BrowserWindow {
         await preserveAgentAuthBeforeRestart({ codexRuntimeHome, claudeRuntimeAuth, store })
       },
       onOrcaProfileAuthMutation: () => desktopRelayService?.authMutated(),
-      onBeforeOrcaProfileSignOut: () => desktopRelayService?.fenceAndCloseNow()
+      onBeforeOrcaProfileSignOut: () => desktopRelayService?.fenceAndCloseNow(),
+      runtimeProfile
     },
     pluginService ?? undefined,
     pluginMarketplaceService && pluginMarketplaceInstaller
@@ -1360,7 +1369,8 @@ function openMainWindow(): BrowserWindow {
       onBeforeUpdateQuit: () =>
         preserveAgentAuthBeforeRestart({ codexRuntimeHome, claudeRuntimeAuth, store }),
       updateInstallMode: resolveUpdateInstallMode(isServeMode),
-      onWorktreeLifecycle: emitPluginWorktreeLifecycle
+      onWorktreeLifecycle: emitPluginWorktreeLifecycle,
+      runtimeProfile
     }
   )
   // Why: attach the durable renderer pull now, but launch the diagnostic process after first paint.
@@ -2737,6 +2747,7 @@ void app.whenReady().then(async () => {
   migrateMobilePairingDataToCanonicalUserDataPath(app.getPath('userData'))
   runtimeRpc = new OrcaRuntimeRpcServer({
     runtime,
+    runtimeProfile,
     // Why: mobile pairing needs the stable pre-setName() path (getCanonicalUserDataPath), not a late app.getPath('userData') that drops paired devices across restarts.
     userDataPath: getCanonicalUserDataPath(),
     enableWebSocket: true,

@@ -34,3 +34,17 @@ export function resolveOrcaRuntimeProfile(
   }
   throw new InvalidOrcaRuntimeProfileError(configuredProfile)
 }
+
+export function resolveOrcaRuntimeProfileAtStartup(
+  environment: RuntimeProfileEnvironment,
+  failClosed: (error: InvalidOrcaRuntimeProfileError) => never
+): OrcaRuntimeProfile {
+  try {
+    return resolveOrcaRuntimeProfile(environment)
+  } catch (error) {
+    if (error instanceof InvalidOrcaRuntimeProfileError) {
+      return failClosed(error)
+    }
+    throw error
+  }
+}

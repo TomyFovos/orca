@@ -1,9 +1,13 @@
 import { z } from 'zod'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { defineMethod, type RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
-import { selectRpcMethodsForRuntimeProfile } from './runtime-profile-method-registry'
+import { ALL_RPC_METHODS } from './methods'
+import {
+  MANAGED_RUNTIME_EXCLUDED_METHOD_PREFIXES,
+  selectRpcMethodsForRuntimeProfile
+} from './runtime-profile-method-registry'
 
 const SAFE_METHOD = defineMethod({
   name: 'terminal.profileProbe',
@@ -11,22 +15,13 @@ const SAFE_METHOD = defineMethod({
   handler: () => ({ source: 'terminal' })
 })
 
-const ORCHESTRATION_METHOD = defineMethod({
-  name: 'orchestration.profileProbe',
+const ORCHESTRATION_READ_METHOD = defineMethod({
+  name: 'orchestration.taskList',
   params: z.object({}),
-  handler: (_params, context) => ({
-    source: 'orchestration',
-    capability: context.orchestrationCapability
-  })
+  handler: () => ({ source: 'orchestration' })
 })
 
-const AGENT_TEAMS_METHOD = defineMethod({
-  name: 'agentTeams.prepareLaunch',
-  params: z.object({}),
-  handler: () => ({ source: 'agent-teams' })
-})
-
-const PROFILE_METHODS = [SAFE_METHOD, ORCHESTRATION_METHOD, AGENT_TEAMS_METHOD] as const
+const PROFILE_METHODS = [SAFE_METHOD, ORCHESTRATION_READ_METHOD] as const
 
 function request(method: string): RpcRequest {
   return {
@@ -38,36 +33,12 @@ function request(method: string): RpcRequest {
 }
 
 describe('runtime profile RPC boundary', () => {
-  afterEach(() => {
-    vi.unstubAllEnvs()
-  })
-
-  it('retains the existing method registry exactly in default mode', async () => {
-    vi.stubEnv('ORCA_RUNTIME_PROFILE', 'default')
+  it('retains the supplied method registry exactly in default mode', async () => {
     expect(selectRpcMethodsForRuntimeProfile('default', PROFILE_METHODS)).toBe(PROFILE_METHODS)
 
     const dispatcher = new RpcDispatcher({
       runtime: new OrcaRuntimeService(),
-      methods: PROFILE_METHODS
-    })
-
-    await expect(
-      dispatcher.dispatch({
-        ...request(ORCHESTRATION_METHOD.name),
-        orchestrationCapability: 'legacy'
-      })
-    ).resolves.toMatchObject({
-      ok: true,
-      result: { source: 'orchestration', capability: 'legacy' }
-    })
-  })
-
-  it('rejects coordinator and agent-teams methods in managed mode while keeping terminal RPC available', async () => {
-    vi.stubEnv('ORCA_RUNTIME_PROFILE', 'managed')
-    expect(selectRpcMethodsForRuntimeProfile('managed', PROFILE_METHODS)).toEqual([SAFE_METHOD])
-
-    const dispatcher = new RpcDispatcher({
-      runtime: new OrcaRuntimeService(),
+      profile: 'default',
       methods: PROFILE_METHODS
     })
 
@@ -75,21 +46,42 @@ describe('runtime profile RPC boundary', () => {
       ok: true,
       result: { source: 'terminal' }
     })
-    await expect(dispatcher.dispatch(request(ORCHESTRATION_METHOD.name))).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'method_not_found' }
-    })
-    await expect(dispatcher.dispatch(request(AGENT_TEAMS_METHOD.name))).resolves.toMatchObject({
-      ok: false,
-      error: { code: 'method_not_found' }
-    })
   })
 
-  it('refuses to initialize a dispatcher for an invalid supplied profile', () => {
-    vi.stubEnv('ORCA_RUNTIME_PROFILE', 'managed-preview')
+  it('removes only real registered method names that match the managed exclusion policy', () => {
+    const allMethodNames = ALL_RPC_METHODS.map((method) => method.name)
+    const excludedMethodNames = allMethodNames.filter((methodName) =>
+      MANAGED_RUNTIME_EXCLUDED_METHOD_PREFIXES.some((prefix) => methodName.startsWith(prefix))
+    )
+    const managedMethodNames = selectRpcMethodsForRuntimeProfile('managed', ALL_RPC_METHODS).map(
+      (method) => method.name
+    )
 
-    expect(
-      () => new RpcDispatcher({ runtime: new OrcaRuntimeService(), methods: PROFILE_METHODS })
-    ).toThrow(/Unsupported ORCA_RUNTIME_PROFILE value/)
+    expect(excludedMethodNames).not.toHaveLength(0)
+    expect(managedMethodNames).toEqual(
+      allMethodNames.filter((methodName) => !excludedMethodNames.includes(methodName))
+    )
+    expect(managedMethodNames).not.toEqual(expect.arrayContaining(excludedMethodNames))
+  })
+
+  it('uses the injected managed profile to reject coordinator RPC while keeping terminal RPC available', async () => {
+    expect(selectRpcMethodsForRuntimeProfile('managed', PROFILE_METHODS)).toEqual([SAFE_METHOD])
+
+    const dispatcher = new RpcDispatcher({
+      runtime: new OrcaRuntimeService(),
+      profile: 'managed',
+      methods: PROFILE_METHODS
+    })
+
+    await expect(dispatcher.dispatch(request(SAFE_METHOD.name))).resolves.toMatchObject({
+      ok: true,
+      result: { source: 'terminal' }
+    })
+    await expect(
+      dispatcher.dispatch(request(ORCHESTRATION_READ_METHOD.name))
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: 'method_not_found' }
+    })
   })
 })

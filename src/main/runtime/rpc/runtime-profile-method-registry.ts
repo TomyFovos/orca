@@ -1,7 +1,7 @@
 import type { OrcaRuntimeProfile } from '../runtime-profile'
 import type { RpcAnyMethod } from './core'
 
-const MANAGED_RUNTIME_EXCLUDED_METHOD_PREFIXES = ['orchestration.', 'agentTeams.'] as const
+export const MANAGED_RUNTIME_EXCLUDED_METHOD_PREFIXES = ['orchestration.'] as const
 
 export function selectRpcMethodsForRuntimeProfile(
   profile: OrcaRuntimeProfile,

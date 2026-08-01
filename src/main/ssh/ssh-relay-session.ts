@@ -78,6 +78,7 @@ import {
 } from '../../shared/ssh-types'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
 import { PTY_CONSUMER_STALE_OWNER_RECOVERY_ERROR } from '../../shared/pty-consumer-session'
 import { runRemoteOrcaCli } from './ssh-remote-orca-cli'
@@ -282,7 +283,8 @@ export class SshRelaySession {
       targetId: string,
       ports: DetectedPort[],
       platform: string
-    ) => void
+    ) => void,
+    private runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
   ) {
     this.ptyConsumerClientInstanceId = claimSshPtyConsumerRecovery(targetId, store).clientInstanceId
   }
@@ -292,13 +294,15 @@ export class SshRelaySession {
     store: Store,
     portForwardManager: SshPortForwardManager,
     runtime?: OrcaRuntimeService,
-    onDetectedPortsChanged?: (targetId: string, ports: DetectedPort[], platform: string) => void
+    onDetectedPortsChanged?: (targetId: string, ports: DetectedPort[], platform: string) => void,
+    runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
   ): void {
     this.getMainWindow = getMainWindow
     this.store = store
     this.portForwardManager = portForwardManager
     this.runtime = runtime
     this.onDetectedPortsChanged = onDetectedPortsChanged
+    this.runtimeProfile = runtimeProfile
   }
 
   setOnRelayLost(cb: (targetId: string) => void): void {
@@ -1027,13 +1031,18 @@ export class SshRelaySession {
       )
       this.activeCompatibilityAttachmentIds.add(runtimeAuthority.attachmentId)
       try {
-        return await runRemoteOrcaCli(this.runtime, {
-          argv,
-          cwd,
-          env,
-          ...(stdin !== undefined ? { stdin } : {}),
-          runtimeAuthority
-        })
+        return await runRemoteOrcaCli(
+          this.runtime,
+          {
+            argv,
+            cwd,
+            env,
+            ...(stdin !== undefined ? { stdin } : {}),
+            runtimeAuthority
+          },
+          undefined,
+          this.runtimeProfile
+        )
       } finally {
         this.activeCompatibilityAttachmentIds.delete(runtimeAuthority.attachmentId)
         this.runtime.releaseOrchestrationCompatibilitySshAttachment(runtimeAuthority.attachmentId)
@@ -1062,7 +1071,8 @@ export class SshRelaySession {
         await acknowledgeRemoteOrcaCliPostOutput(this.runtime, {
           postOutput: parseRemoteOrcaCliPostOutput(params.postOutput),
           env,
-          runtimeAuthority
+          runtimeAuthority,
+          runtimeProfile: this.runtimeProfile
         })
         return { acknowledged: true }
       } finally {

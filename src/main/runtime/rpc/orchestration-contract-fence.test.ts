@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from '../orchestration/db'
+import type { OrcaRuntimeProfile } from '../runtime-profile'
 import { defineMethod, type RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
 
@@ -16,7 +17,7 @@ describe('orchestration contract fence', () => {
     }
   })
 
-  function createHarness(method = 'orchestration.send') {
+  function createHarness(method = 'orchestration.send', profile: OrcaRuntimeProfile = 'default') {
     const database = new OrchestrationDb(':memory:')
     databases.push(database)
     const runtime = new OrcaRuntimeService()
@@ -24,6 +25,7 @@ describe('orchestration contract fence', () => {
     const effect = vi.fn(() => ({ accepted: true }))
     const dispatcher = new RpcDispatcher({
       runtime,
+      profile,
       methods: [
         defineMethod({
           name: method,
@@ -126,6 +128,29 @@ describe('orchestration contract fence', () => {
 
   it('applies the same pre-effect fence on WebSocket dispatch', async () => {
     const { dispatcher, effect } = createHarness()
+    const replies: string[] = []
+    await dispatcher.dispatchStreaming(request(), (reply) => replies.push(reply))
+
+    expect(JSON.parse(replies[0] ?? '{}')).toMatchObject({
+      ok: false,
+      error: { code: 'orchestration_migration_required' }
+    })
+    expect(effect).not.toHaveBeenCalled()
+  })
+
+  it('enforces the pre-effect fence in managed non-streaming dispatch before method filtering', async () => {
+    const { dispatcher, effect } = createHarness('orchestration.send', 'managed')
+    const response = await dispatcher.dispatch(request())
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: { code: 'orchestration_migration_required' }
+    })
+    expect(effect).not.toHaveBeenCalled()
+  })
+
+  it('enforces the pre-effect fence in managed streaming dispatch before method filtering', async () => {
+    const { dispatcher, effect } = createHarness('orchestration.send', 'managed')
     const replies: string[] = []
     await dispatcher.dispatchStreaming(request(), (reply) => replies.push(reply))
 

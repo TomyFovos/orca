@@ -20,7 +20,7 @@ import { orchestrationMigrationFence } from './orchestration-contract-fence'
 import { recordRuntimeFeatureInteraction } from './runtime-feature-interaction'
 import type { RpcDispatchStreamingOptions } from './dispatcher-stream-options'
 import { invalidArgumentResponse, mapDispatcherError } from './dispatcher-error-response'
-import { resolveOrcaRuntimeProfile } from '../runtime-profile'
+import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime-profile'
 import {
   createOrchestrationDispatchMiddleware,
   type OrchestrationDispatchContext,
@@ -29,22 +29,33 @@ import {
 } from './orchestration-dispatch-middleware'
 import { selectRpcMethodsForRuntimeProfile } from './runtime-profile-method-registry'
 
-export type DispatcherOptions = { runtime: OrcaRuntimeService; methods?: readonly RpcAnyMethod[] }
+export type DispatcherOptions = {
+  runtime: OrcaRuntimeService
+  profile?: OrcaRuntimeProfile
+  methods?: readonly RpcAnyMethod[]
+}
 
 export class RpcDispatcher {
   private readonly runtime: OrcaRuntimeService
   private readonly registry: RpcRegistry
   private readonly orchestrationDispatchMiddleware: OrchestrationDispatchMiddleware | undefined
 
-  constructor({ runtime, methods = ALL_RPC_METHODS }: DispatcherOptions) {
+  constructor({
+    runtime,
+    profile = DEFAULT_ORCA_RUNTIME_PROFILE,
+    methods = ALL_RPC_METHODS
+  }: DispatcherOptions) {
     this.runtime = runtime
-    const profile = resolveOrcaRuntimeProfile()
     this.registry = buildRegistry(selectRpcMethodsForRuntimeProfile(profile, methods))
     this.orchestrationDispatchMiddleware = createOrchestrationDispatchMiddleware(runtime, profile)
   }
 
   async dispatch(request: RpcRequest, options?: { signal?: AbortSignal }): Promise<RpcResponse> {
     const meta = this.meta()
+    const migrationFence = orchestrationMigrationFence(request, meta)
+    if (migrationFence) {
+      return migrationFence
+    }
     const method = this.registry.get(request.method)
     if (!method) {
       return errorResponse(
@@ -53,13 +64,6 @@ export class RpcDispatcher {
         'method_not_found',
         `Unknown method: ${request.method}`
       )
-    }
-
-    if (this.orchestrationDispatchMiddleware) {
-      const migrationFence = orchestrationMigrationFence(request, meta)
-      if (migrationFence) {
-        return migrationFence
-      }
     }
 
     const parsedParams = this.parseParams(request, method, meta)
@@ -116,6 +120,11 @@ export class RpcDispatcher {
     options?: RpcDispatchStreamingOptions
   ): Promise<void> {
     const meta = this.meta()
+    const migrationFence = orchestrationMigrationFence(request, meta)
+    if (migrationFence) {
+      reply(JSON.stringify(migrationFence))
+      return
+    }
     const method = this.registry.get(request.method)
     if (!method) {
       reply(
@@ -124,14 +133,6 @@ export class RpcDispatcher {
         )
       )
       return
-    }
-
-    if (this.orchestrationDispatchMiddleware) {
-      const migrationFence = orchestrationMigrationFence(request, meta)
-      if (migrationFence) {
-        reply(JSON.stringify(migrationFence))
-        return
-      }
     }
 
     const parsedParams = this.parseParams(request, method, meta)

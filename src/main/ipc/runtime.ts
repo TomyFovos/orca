@@ -1,5 +1,6 @@
 import { BrowserWindow, ipcMain } from 'electron'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import type {
   RuntimeBrowserDriverState,
   RuntimeStatus,
@@ -20,7 +21,10 @@ function boundTerminalFitRestore(pending: Promise<boolean>): Promise<boolean> {
   return Promise.race([pending, deadline]).finally(() => clearTimeout(timer))
 }
 
-export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
+export function registerRuntimeHandlers(
+  runtime: OrcaRuntimeService,
+  runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
+): void {
   const pendingTerminalFitRestores = new Map<string, Promise<boolean>>()
   ipcMain.removeHandler('runtime:syncWindowGraph')
   ipcMain.removeHandler('runtime:getStatus')
@@ -47,7 +51,7 @@ export function registerRuntimeHandlers(runtime: OrcaRuntimeService): void {
       _event,
       args: { method: string; params?: unknown }
     ): Promise<RuntimeRpcResponse<unknown>> => {
-      return (await new RpcDispatcher({ runtime }).dispatch({
+      return (await new RpcDispatcher({ runtime, profile: runtimeProfile }).dispatch({
         id: 'desktop-ipc',
         authToken: 'desktop-ipc',
         method: args.method,
