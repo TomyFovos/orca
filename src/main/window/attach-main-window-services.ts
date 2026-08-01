@@ -32,7 +32,7 @@ import { registerRemoteWorkspaceHandlers } from '../ipc/remote-workspace'
 import { browserManager } from '../browser/browser-manager'
 import { hasSystemMediaAccess, requestSystemMediaAccess } from '../browser/browser-media-access'
 import type { OrcaRuntimeService, RuntimeWorktreeLifecycleEvent } from '../runtime/orca-runtime'
-import type { OrcaRuntimeProfile } from '../runtime/runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import {
   checkForUpdatesFromMenu,
   downloadUpdate,
@@ -144,11 +144,12 @@ export function attachMainWindowServices(
         )
       })
   }
-  if (options?.runtimeProfile) {
-    registerSshHandlers(store, () => mainWindow, runtime, options.runtimeProfile)
-  } else {
-    registerSshHandlers(store, () => mainWindow, runtime)
-  }
+  registerSshHandlers(
+    store,
+    () => mainWindow,
+    runtime,
+    options?.runtimeProfile ?? getProcessRuntimeProfile()
+  )
   registerRemoteWorkspaceHandlers(store, () => mainWindow)
   registerFileDropRelay(mainWindow)
   registerTccPromptNoticeHandlers(mainWindow)

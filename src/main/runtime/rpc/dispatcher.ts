@@ -20,7 +20,7 @@ import { orchestrationMigrationFence } from './orchestration-contract-fence'
 import { recordRuntimeFeatureInteraction } from './runtime-feature-interaction'
 import type { RpcDispatchStreamingOptions } from './dispatcher-stream-options'
 import { invalidArgumentResponse, mapDispatcherError } from './dispatcher-error-response'
-import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime-profile'
 import {
   createOrchestrationDispatchMiddleware,
   type OrchestrationDispatchContext,
@@ -42,7 +42,7 @@ export class RpcDispatcher {
 
   constructor({
     runtime,
-    profile = DEFAULT_ORCA_RUNTIME_PROFILE,
+    profile = getProcessRuntimeProfile(),
     methods = ALL_RPC_METHODS
   }: DispatcherOptions) {
     this.runtime = runtime

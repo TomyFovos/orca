@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { describe, expect, it } from 'vitest'
 import { OrcaRuntimeService } from '../orca-runtime'
+import { setProcessRuntimeProfile } from '../runtime-profile'
 import { defineMethod, type RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
 import { ALL_RPC_METHODS } from './methods'
@@ -83,5 +84,28 @@ describe('runtime profile RPC boundary', () => {
       ok: false,
       error: { code: 'method_not_found' }
     })
+  })
+
+  it('uses the process managed profile when constructed without an injected profile', async () => {
+    setProcessRuntimeProfile('managed')
+    try {
+      const dispatcher = new RpcDispatcher({
+        runtime: new OrcaRuntimeService(),
+        methods: PROFILE_METHODS
+      })
+
+      await expect(dispatcher.dispatch(request(SAFE_METHOD.name))).resolves.toMatchObject({
+        ok: true,
+        result: { source: 'terminal' }
+      })
+      await expect(
+        dispatcher.dispatch(request(ORCHESTRATION_READ_METHOD.name))
+      ).resolves.toMatchObject({
+        ok: false,
+        error: { code: 'method_not_found' }
+      })
+    } finally {
+      setProcessRuntimeProfile('default')
+    }
   })
 })

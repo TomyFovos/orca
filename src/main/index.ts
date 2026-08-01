@@ -66,7 +66,10 @@ import { initOnboardingCohortClassifier } from './telemetry/onboarding-cohort-cl
 import { resolveConsent } from './telemetry/consent'
 import { triggerStartupNotificationRegistration } from './ipc/notifications'
 import { OrcaRuntimeService, type RuntimeWorktreeLifecycleEvent } from './runtime/orca-runtime'
-import { resolveOrcaRuntimeProfileAtStartup } from './runtime/runtime-profile'
+import {
+  resolveOrcaRuntimeProfileAtStartup,
+  setProcessRuntimeProfile
+} from './runtime/runtime-profile'
 import { loadAgentSessionClaimSigner } from './runtime/agent-session-claim-identity'
 import {
   fingerprintOrchestrationPeer,
@@ -379,6 +382,7 @@ const runtimeProfile = resolveOrcaRuntimeProfileAtStartup(process.env, (error) =
   app.exit(1)
   throw error
 })
+setProcessRuntimeProfile(runtimeProfile)
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(

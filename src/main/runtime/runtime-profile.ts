@@ -8,6 +8,8 @@ export type OrcaRuntimeProfile =
 
 export type RuntimeProfileEnvironment = Readonly<Record<string, string | undefined>>
 
+let processRuntimeProfile: OrcaRuntimeProfile | undefined
+
 export class InvalidOrcaRuntimeProfileError extends Error {
   constructor(configuredProfile: string) {
     super(
@@ -47,4 +49,15 @@ export function resolveOrcaRuntimeProfileAtStartup(
     }
     throw error
   }
+}
+
+export function setProcessRuntimeProfile(profile: OrcaRuntimeProfile): void {
+  processRuntimeProfile = profile
+}
+
+export function getProcessRuntimeProfile(): OrcaRuntimeProfile {
+  // Why: this default fallback is test-only. Unit tests instantiate lower-level runtime entry
+  // points without loading main/index.ts. The production main process always sets this during
+  // startup, before PTY, IPC, or RPC initialization.
+  return processRuntimeProfile ?? DEFAULT_ORCA_RUNTIME_PROFILE
 }

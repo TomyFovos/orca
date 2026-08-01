@@ -5,7 +5,7 @@ import { readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RuntimeMetadata, RuntimeTransportMetadata } from '../../shared/runtime-bootstrap'
 import type { OrcaRuntimeService } from './orca-runtime'
-import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from './runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from './runtime-profile'
 import { writeRuntimeMetadata } from './runtime-metadata'
 import {
   RUNTIME_METADATA_OWNERSHIP_POLL_MS,
@@ -515,7 +515,7 @@ export class OrcaRuntimeRpcServer {
 
   constructor({
     runtime,
-    runtimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE,
+    runtimeProfile = getProcessRuntimeProfile(),
     userDataPath,
     pid = process.pid,
     platform = process.platform,

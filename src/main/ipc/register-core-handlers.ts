@@ -4,7 +4,7 @@ import { registerCliHandlers } from './cli'
 import { registerPreflightHandlers } from './preflight'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import type { OrcaRuntimeProfile } from '../runtime/runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import type { StatsCollector } from '../stats/collector'
 import { registerFilesystemHandlers } from './filesystem'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
@@ -214,11 +214,7 @@ export function registerCoreHandlers(
     registerFilesystemHandlers(store)
   }
   registerFilesystemWatcherHandlers()
-  if (lifecycleOptions.runtimeProfile) {
-    registerRuntimeHandlers(runtime, lifecycleOptions.runtimeProfile)
-  } else {
-    registerRuntimeHandlers(runtime)
-  }
+  registerRuntimeHandlers(runtime, lifecycleOptions.runtimeProfile ?? getProcessRuntimeProfile())
   registerRuntimeEnvironmentHandlers(store)
   registerEphemeralVmHandlers(store, pluginService)
   registerAiVaultHandlers({

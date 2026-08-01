@@ -6,7 +6,7 @@ import { ORCHESTRATION_CONTRACT_VERSION } from '../../shared/protocol-version'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
 import type { RpcResponse } from '../runtime/rpc/core'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import {
   HostCliUnavailableError,
   runHostOrcaCliPassthrough,
@@ -50,7 +50,7 @@ export async function runRemoteOrcaCli(
   runtime: OrcaRuntimeService,
   request: RemoteOrcaCliRequest,
   passthroughOptions?: HostCliPassthroughOptions,
-  runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
+  runtimeProfile: OrcaRuntimeProfile = getProcessRuntimeProfile()
 ): Promise<RemoteOrcaCliResult> {
   const parsed = parseRemoteCliArgs(request.argv)
   const json = parsed.flags.has('json')

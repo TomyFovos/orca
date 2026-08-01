@@ -78,7 +78,7 @@ import {
 } from '../../shared/ssh-types'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
-import { DEFAULT_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import { DEFAULT_PTY_SOURCE_WINDOW_SU } from '../../shared/pty-source-credit-contract'
 import { PTY_CONSUMER_STALE_OWNER_RECOVERY_ERROR } from '../../shared/pty-consumer-session'
 import { runRemoteOrcaCli } from './ssh-remote-orca-cli'
@@ -284,7 +284,7 @@ export class SshRelaySession {
       ports: DetectedPort[],
       platform: string
     ) => void,
-    private runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
+    private runtimeProfile: OrcaRuntimeProfile = getProcessRuntimeProfile()
   ) {
     this.ptyConsumerClientInstanceId = claimSshPtyConsumerRecovery(targetId, store).clientInstanceId
   }
@@ -295,7 +295,7 @@ export class SshRelaySession {
     portForwardManager: SshPortForwardManager,
     runtime?: OrcaRuntimeService,
     onDetectedPortsChanged?: (targetId: string, ports: DetectedPort[], platform: string) => void,
-    runtimeProfile: OrcaRuntimeProfile = DEFAULT_ORCA_RUNTIME_PROFILE
+    runtimeProfile: OrcaRuntimeProfile = getProcessRuntimeProfile()
   ): void {
     this.getMainWindow = getMainWindow
     this.store = store
