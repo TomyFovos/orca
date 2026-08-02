@@ -69,13 +69,27 @@ describe('SkillUpdateRunner', () => {
     ])
   })
 
-  it('rejects orchestration delivery in managed mode before the npx spawn', () => {
+  it('skips orchestration delivery but updates other skills in managed mode', () => {
     setProcessRuntimeProfile('managed')
     const { runner, spawnCalls } = makeRunner()
 
-    expect(() => runner.start(['orchestration', 'orca-cli'])).toThrow(
-      'external control-plane authorization'
-    )
+    expect(runner.start(['orchestration', 'orca-cli'])).toEqual({
+      started: true,
+      skippedNames: ['orchestration']
+    })
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0].args).toEqual(['--yes', 'skills', 'update', 'orca-cli', '--global', '-y'])
+  })
+
+  it('does not spawn when orchestration is the only managed skill request', () => {
+    setProcessRuntimeProfile('managed')
+    const { runner, spawnCalls } = makeRunner()
+
+    expect(runner.start(['orchestration'])).toEqual({
+      started: false,
+      reason: 'no-eligible-names',
+      skippedNames: ['orchestration']
+    })
     expect(spawnCalls).toHaveLength(0)
   })
 

@@ -950,16 +950,6 @@ describe('orca skills CLI', () => {
     expect(process.exitCode).toBe(2)
   })
 
-  it('refuses an inherited managed orchestration update before spawning npx', async () => {
-    vi.stubEnv('ORCA_RUNTIME_PROFILE', 'managed')
-    vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    await main(['skills', 'update', '--skill', 'orchestration'], '/tmp/repo')
-
-    expect(process.exitCode).toBe(1)
-    expect(spawnMock).not.toHaveBeenCalled()
-  })
-
   it('rejects --json for a real (non-dry-run) update', async () => {
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {})
 

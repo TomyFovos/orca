@@ -7,7 +7,7 @@ import {
 import { resolveCliCommand } from '../codex-cli/command'
 import { killWithDescendantSweep } from '../pty-descendant-termination'
 import { getSpawnArgsForWindows, WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL } from '../win32-utils'
-import { assertManagedExecutionSkillDeliveryAllowed } from '../runtime/managed-execution/authorization'
+import { filterManagedExecutionSkillDelivery } from '../runtime/managed-execution/authorization'
 
 // Why: `skills update` prints ANSI colour and \r + erase-line progress. We show
 // this log verbatim to the user but never parse it — `update` has no --json
@@ -90,14 +90,17 @@ export class SkillUpdateRunner {
       return { started: false, reason: 'invalid-names' }
     }
     // Why: only the orchestration bundle is prohibited in managed mode. Other
-    // skill maintenance remains available and this check occurs before npx can
-    // write any global agent installation.
-    assertManagedExecutionSkillDeliveryAllowed(canonicalNames, 'orchestration skill update')
+    // skill maintenance remains available, and npx must receive only the
+    // allowed names before it can write any global agent installation.
+    const { allowedNames, skippedNames } = filterManagedExecutionSkillDelivery(canonicalNames)
+    if (allowedNames.length === 0) {
+      return { started: false, reason: 'no-eligible-names', skippedNames }
+    }
 
     const resolveCommand = this.deps.resolveCommand ?? ((name: string) => resolveCliCommand(name))
     const spawnProcess = this.deps.spawnProcess ?? spawn
     const npxCommand = resolveCommand('npx')
-    const npxArgs = ['--yes', 'skills', 'update', ...canonicalNames, '--global', '-y']
+    const npxArgs = ['--yes', 'skills', 'update', ...allowedNames, '--global', '-y']
 
     let spawnCmd: string
     let spawnArgs: string[]
@@ -185,7 +188,7 @@ export class SkillUpdateRunner {
       )
     })
 
-    return { started: true }
+    return skippedNames.length > 0 ? { started: true, skippedNames } : { started: true }
   }
 
   private settle(token: number, names: string[], spawnError: string | null): void {

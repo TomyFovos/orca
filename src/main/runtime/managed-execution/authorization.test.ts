@@ -7,7 +7,7 @@ import {
 import {
   ManagedExecutionAuthorizationRequiredError,
   assertManagedExecutionAuthorized,
-  assertManagedExecutionSkillDeliveryAllowed,
+  filterManagedExecutionSkillDelivery,
   propagateManagedRuntimeProfile
 } from './authorization'
 
@@ -40,20 +40,16 @@ describe('managed execution authorization boundary', () => {
     })
   })
 
-  it('rejects orchestration skill delivery without blocking other skills', () => {
-    expect(() =>
-      assertManagedExecutionSkillDeliveryAllowed(
-        ['orca-cli'],
-        'skill update',
+  it('skips only orchestration skill delivery in managed mode', () => {
+    expect(
+      filterManagedExecutionSkillDelivery(
+        ['orchestration', 'orca-cli'],
         MANAGED_ORCA_RUNTIME_PROFILE
       )
-    ).not.toThrow()
-    expect(() =>
-      assertManagedExecutionSkillDeliveryAllowed(
-        ['orchestration'],
-        'skill update',
-        MANAGED_ORCA_RUNTIME_PROFILE
-      )
-    ).toThrow(ManagedExecutionAuthorizationRequiredError)
+    ).toEqual({ allowedNames: ['orca-cli'], skippedNames: ['orchestration'] })
+    expect(filterManagedExecutionSkillDelivery(['orca-cli'], 'default')).toEqual({
+      allowedNames: ['orca-cli'],
+      skippedNames: []
+    })
   })
 })

@@ -37,3 +37,21 @@ export function resolveOrcaRuntimeProfile(
   }
   throw new InvalidOrcaRuntimeProfileError(configuredProfile)
 }
+
+/**
+ * The orchestration bundle remains external-control-plane-owned in managed
+ * execution. Keep other requested skills eligible instead of denying a whole
+ * maintenance batch.
+ */
+export function filterOrchestrationSkillDelivery(
+  skillNames: readonly string[],
+  runtimeProfile: OrcaRuntimeProfile
+): { allowedNames: string[]; skippedNames: string[] } {
+  if (runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE) {
+    return { allowedNames: [...skillNames], skippedNames: [] }
+  }
+  return {
+    allowedNames: skillNames.filter((name) => name !== 'orchestration'),
+    skippedNames: skillNames.filter((name) => name === 'orchestration')
+  }
+}

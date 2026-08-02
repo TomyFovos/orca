@@ -21,7 +21,7 @@ import {
   buildAgentFeatureSkillUpdateArgs
 } from '../../shared/agent-feature-install-commands'
 import {
-  MANAGED_ORCA_RUNTIME_PROFILE,
+  filterOrchestrationSkillDelivery,
   resolveOrcaRuntimeProfile
 } from '../../shared/runtime-profile'
 
@@ -68,18 +68,6 @@ function requireTopic(
 
 function writeStdout(value: string): void {
   process.stdout.write(value.endsWith('\n') ? value : `${value}\n`)
-}
-
-function assertCliOrchestrationSkillDeliveryAllowed(skillNames: readonly string[]): void {
-  if (
-    resolveOrcaRuntimeProfile(process.env) === MANAGED_ORCA_RUNTIME_PROFILE &&
-    skillNames.includes('orchestration')
-  ) {
-    throw new RuntimeClientError(
-      'managed_execution_authorization_required',
-      'Managed execution cannot perform orchestration skill delivery without an external control-plane authorization.'
-    )
-  }
 }
 
 function resolveSelectedSkillNames(
@@ -303,13 +291,13 @@ function createSkillMutationHandler(verb: SkillMutationVerb): CommandHandler {
     }
 
     const global = flags.get('local') !== true
-    // Why: install scopes its targets; update only refreshes what is already placed.
-    const agents = verb === 'install' ? resolveInstallAgentKeys(flags) : []
-    const npxArgs = buildNpxSkillsArgs(verb, skillNames, global, agents)
-    const command = formatNpxCommand(npxArgs)
     const dryRun = flags.get('dry-run') === true
 
     if (dryRun) {
+      // Why: install scopes its targets; update only refreshes what is already placed.
+      const agents = verb === 'install' ? resolveInstallAgentKeys(flags) : []
+      const npxArgs = buildNpxSkillsArgs(verb, skillNames, global, agents)
+      const command = formatNpxCommand(npxArgs)
       writeStdout(
         json
           ? JSON.stringify({ command, skills: skillNames, global, executed: false }, null, 2)
@@ -330,8 +318,24 @@ function createSkillMutationHandler(verb: SkillMutationVerb): CommandHandler {
 
     // Why: a managed worker inherits ORCA_RUNTIME_PROFILE from its spawning
     // main-process path. Resolve it in this standalone CLI process before npx
-    // can install or update the orchestration bundle.
-    assertCliOrchestrationSkillDeliveryAllowed(skillNames)
+    // can install or update the orchestration bundle. Preserve all other skills
+    // rather than turning a mixed request into a whole-batch denial.
+    const { allowedNames, skippedNames } = filterOrchestrationSkillDelivery(
+      skillNames,
+      resolveOrcaRuntimeProfile(process.env)
+    )
+    if (skippedNames.length > 0) {
+      process.stderr.write(
+        'Skipped orchestration skill delivery in managed execution: it requires external control-plane authorization.\n'
+      )
+    }
+    if (allowedNames.length === 0) {
+      return
+    }
+    // Why: install scopes its targets; update only refreshes what is already placed.
+    const agents = verb === 'install' ? resolveInstallAgentKeys(flags) : []
+    const npxArgs = buildNpxSkillsArgs(verb, allowedNames, global, agents)
+    const command = formatNpxCommand(npxArgs)
     // Why: stdio is inherited for the child below, so this status line must go to
     // stderr — stdout is npx's own output, not this command's JSON channel.
     process.stderr.write(`Running: ${command}\n`)

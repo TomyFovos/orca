@@ -233,5 +233,9 @@ export type SkillUpdateRun =
     }
 
 export type SkillUpdateStartResult =
-  | { started: true }
-  | { started: false; reason: 'already-running' | 'invalid-names' | 'unsafe-command-path' }
+  | { started: true; skippedNames?: string[] }
+  | {
+      started: false
+      reason: 'already-running' | 'invalid-names' | 'unsafe-command-path' | 'no-eligible-names'
+      skippedNames?: string[]
+    }

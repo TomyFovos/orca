@@ -8,6 +8,7 @@ import {
 
 export {
   DEFAULT_ORCA_RUNTIME_PROFILE,
+  filterOrchestrationSkillDelivery,
   InvalidOrcaRuntimeProfileError,
   MANAGED_ORCA_RUNTIME_PROFILE,
   ORCA_RUNTIME_PROFILE_ENV,

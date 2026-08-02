@@ -1,4 +1,5 @@
 import {
+  filterOrchestrationSkillDelivery,
   getProcessRuntimeProfile,
   MANAGED_ORCA_RUNTIME_PROFILE,
   ORCA_RUNTIME_PROFILE_ENV,
@@ -100,12 +101,14 @@ export function propagateManagedRuntimeProfile<
   } as unknown as T
 }
 
-export function assertManagedExecutionSkillDeliveryAllowed(
+/**
+ * The orchestration bundle is withheld in managed execution until the external
+ * control-plane adapter can authorize its delivery. Keep every other skill in
+ * the request so managed skill maintenance does not become a whole-batch deny.
+ */
+export function filterManagedExecutionSkillDelivery(
   skillNames: readonly string[],
-  operation: string,
   runtimeProfile: OrcaRuntimeProfile = getProcessRuntimeProfile()
-): void {
-  if (runtimeProfile === MANAGED_ORCA_RUNTIME_PROFILE && skillNames.includes('orchestration')) {
-    throw new ManagedExecutionAuthorizationRequiredError(operation)
-  }
+): { allowedNames: string[]; skippedNames: string[] } {
+  return filterOrchestrationSkillDelivery(skillNames, runtimeProfile)
 }
