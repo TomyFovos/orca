@@ -6,7 +6,9 @@ import {
   _installedAgentSkillDiscoveryInternalsForTests,
   hasInstalledAgentSkill,
   hasInstalledAgentSkillNamed,
-  notifyInstalledAgentSkillsRefreshed
+  notifyInstalledAgentSkillsRefreshed,
+  resolveOrchestrationSkillStateForRuntime,
+  type InstalledAgentSkillState
 } from './useInstalledAgentSkills'
 
 afterEach(() => {
@@ -169,6 +171,67 @@ describe('isOrchestrationSkillName', () => {
     expect(
       _installedAgentSkillDiscoveryInternalsForTests.isOrchestrationSkillName('computer-use')
     ).toBe(false)
+  })
+})
+
+describe('resolveOrchestrationSkillStateForRuntime', () => {
+  function baseState(overrides: Partial<InstalledAgentSkillState> = {}): InstalledAgentSkillState {
+    return {
+      installed: false,
+      loading: true,
+      settled: false,
+      error: null,
+      skills: [],
+      sources: [],
+      refresh: async () => false,
+      ...overrides
+    }
+  }
+
+  it('leaves state untouched in default execution', () => {
+    const state = baseState()
+    expect(resolveOrchestrationSkillStateForRuntime('default', ['orchestration'], state)).toBe(
+      state
+    )
+  })
+
+  it('leaves state untouched in managed execution for non-orchestration skills', () => {
+    const state = baseState()
+    expect(resolveOrchestrationSkillStateForRuntime('managed', ['computer-use'], state)).toBe(state)
+  })
+
+  it('treats the orchestration skill as satisfied (N/A) in managed execution', () => {
+    const state = baseState({
+      installed: false,
+      loading: true,
+      settled: false,
+      error: 'scan failed'
+    })
+    const resolved = resolveOrchestrationSkillStateForRuntime('managed', ['orchestration'], state)
+    expect(resolved.installed).toBe(true)
+    expect(resolved.loading).toBe(false)
+    expect(resolved.settled).toBe(true)
+    expect(resolved.error).toBeNull()
+  })
+
+  it('normalizes when the orchestration skill appears alongside other names', () => {
+    const state = baseState()
+    const resolved = resolveOrchestrationSkillStateForRuntime(
+      'managed',
+      ['computer-use', ' Orchestration '],
+      state
+    )
+    expect(resolved.installed).toBe(true)
+    expect(resolved.settled).toBe(true)
+  })
+
+  it('preserves the raw discovery result and refresh handle in managed execution', () => {
+    const skills = [skill({ name: 'orchestration' })]
+    const refresh = async (): Promise<boolean> => true
+    const state = baseState({ skills, refresh })
+    const resolved = resolveOrchestrationSkillStateForRuntime('managed', ['orchestration'], state)
+    expect(resolved.skills).toBe(skills)
+    expect(resolved.refresh).toBe(refresh)
   })
 })
 

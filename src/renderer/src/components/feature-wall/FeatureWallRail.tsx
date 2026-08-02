@@ -1,9 +1,8 @@
 import type { JSX, KeyboardEvent } from 'react'
 import { Check } from 'lucide-react'
-import {
-  FEATURE_WALL_WORKFLOWS,
-  type FeatureWallWorkflow,
-  type FeatureWallWorkflowId
+import type {
+  FeatureWallWorkflow,
+  FeatureWallWorkflowId
 } from '../../../../shared/feature-wall-workflows'
 import type { AgentsStep, AgentsStepId } from '../../../../shared/agents-orchestration-steps'
 import type { WorkbenchStep, WorkbenchStepId } from '../../../../shared/workbench-steps'
@@ -15,6 +14,7 @@ const SUB_STEP_LABELS = ['a', 'b', 'c', 'd', 'e', 'f'] as const
 
 export function FeatureWallRail(props: {
   selectedId: FeatureWallWorkflowId
+  workflows: readonly FeatureWallWorkflow[]
   previewPanelId: string
   railRefs: React.MutableRefObject<(HTMLButtonElement | null)[]>
   onSelect: (workflow: FeatureWallWorkflow) => void
@@ -35,6 +35,7 @@ export function FeatureWallRail(props: {
 }): JSX.Element {
   const {
     selectedId,
+    workflows,
     previewPanelId,
     railRefs,
     onSelect,
@@ -59,7 +60,7 @@ export function FeatureWallRail(props: {
       aria-label={translate('auto.components.feature.wall.FeatureWallRail.7593d15f94', 'Workflows')}
     >
       <div role="tablist" aria-orientation="vertical" className="flex flex-col gap-1.5 pt-1.5">
-        {FEATURE_WALL_WORKFLOWS.map((workflow, index) => {
+        {workflows.map((workflow, index) => {
           const isSelected = workflow.id === selectedId
           const isDone = workflowDone[workflow.id] === true
           const subSteps =

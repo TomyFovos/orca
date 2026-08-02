@@ -19,6 +19,8 @@ import { isTerminalImeInputContextRefreshing } from '@/components/terminal-pane/
 import { Button } from '@/components/ui/button'
 import { useMountedRef } from '@/hooks/useMountedRef'
 import { useShortcutKeyDetails, type ShortcutKeyComboDetails } from '@/hooks/useShortcutLabel'
+import { useRuntimeProfile } from '@/hooks/useRuntimeProfile'
+import { isManagedRuntimeProfile } from '@/lib/runtime-profile-access'
 import {
   Dialog,
   DialogContent,
@@ -273,6 +275,11 @@ export function FloatingTerminalPanel({
   const [showOrchestrationSetup, setShowOrchestrationSetup] = useState(
     () => !hasOrchestrationSetupMarker() && !isOrchestrationSetupDismissed()
   )
+  // Why: in managed execution the orchestration bundle is owned by the external
+  // control plane, so the "Enable orchestration" banner and its setup dialog are
+  // never user-actionable. Gate both here (fail-closed via the sync profile read)
+  // so no entry point to the hidden orchestration setup survives.
+  const orchestrationSetupHidden = isManagedRuntimeProfile(useRuntimeProfile())
   const restoreBoundsRef = useRef<FloatingTerminalPanelBoundsState | null>(null)
   const stagedBoundsRef = useRef<FloatingTerminalPanelBounds | null>(null)
   const lastPersistedBoundsRef = useRef<FloatingTerminalPanelCommittedBounds | null>(
@@ -1942,7 +1949,7 @@ export function FloatingTerminalPanel({
           ) : null}
         </div>
       </div>
-      {showOrchestrationSetup && activeTabType === 'terminal' ? (
+      {showOrchestrationSetup && !orchestrationSetupHidden && activeTabType === 'terminal' ? (
         <div
           className="absolute right-4 bottom-4 z-10 w-[280px] rounded-md border border-border/60 bg-card/95 p-3 text-card-foreground shadow-xs"
           data-floating-terminal-no-drag
@@ -1999,7 +2006,7 @@ export function FloatingTerminalPanel({
         />
       )}
       <FloatingTerminalOrchestrationDialog
-        open={orchestrationDialogOpen}
+        open={orchestrationDialogOpen && !orchestrationSetupHidden}
         onOpenChange={setOrchestrationDialogOpen}
         onSetupStateChange={() => void refreshOrchestrationSetupVisibility()}
       />

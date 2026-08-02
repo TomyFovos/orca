@@ -29,6 +29,7 @@ export function FeatureWallTourPanel(props: {
   previewPanelId: string
   previewTitleId: string
   selected: FeatureWallWorkflow
+  workflows: readonly FeatureWallWorkflow[]
   description: string
   activeStepCopy: FeatureWallActiveStepCopy | null
   completion: FeatureWallCompletionState
@@ -80,6 +81,7 @@ export function FeatureWallTourPanel(props: {
         <div className="min-h-0 md:border-r md:border-border">
           <FeatureWallRail
             selectedId={props.selected.id as FeatureWallWorkflowId}
+            workflows={props.workflows}
             previewPanelId={props.previewPanelId}
             railRefs={props.railRefs}
             onSelect={props.onSelectWorkflow}

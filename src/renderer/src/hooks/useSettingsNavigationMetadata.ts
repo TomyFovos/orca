@@ -39,6 +39,8 @@ import type { Repo } from '../../../shared/types'
 import { getRepoKindLabel } from '../../../shared/repo-kind'
 import { useAppStore } from '@/store'
 import { isMacUserAgent, isWindowsUserAgent } from '@/components/terminal-pane/pane-helpers'
+import { useRuntimeProfile } from '@/hooks/useRuntimeProfile'
+import { isManagedRuntimeProfile } from '@/lib/runtime-profile-access'
 import type { SettingsNavSection } from '@/lib/settings-navigation-types'
 import { getGeneralPaneSearchEntries } from '@/components/settings/general-search'
 import { getAgentsPaneSearchEntries } from '@/components/settings/agents-search'
@@ -630,6 +632,7 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
     settings?.activeRuntimeEnvironmentId
   )
   const runtimeTarget = getActiveRuntimeTarget(settings)
+  const runtimeProfile = useRuntimeProfile()
   const capabilityLoadTarget = isWebClient ? { kind: 'local' as const } : runtimeTarget
   const windowsTerminalCapabilities = useWindowsTerminalCapabilities(
     isWindows || isWebClient || runtimeTarget.kind === 'environment',
@@ -657,8 +660,8 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
   // and search entries cannot drift. Keep this hook free of Settings pane UI
   // imports; see docs/reference/cmd-j-settings-actions-plan.md.
   return useMemo(
-    () =>
-      buildSettingsNavigationMetadata({
+    () => {
+      const sections = buildSettingsNavigationMetadata({
         isMac,
         isWindows,
         isLocalWindowsHost,
@@ -667,7 +670,18 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
         isDev: import.meta.env.DEV,
         isLinearConnected,
         repos
-      }),
+      })
+      // Why: the orchestration pane is owned by the external control plane in
+      // managed execution and is never user-reachable. Drop its nav entry here —
+      // the single supply source shared by the Settings sidebar and Cmd+J — so no
+      // link to the hidden pane survives. The builder stays a pure registry of all
+      // possible sections; the runtime gate is enforced at this chokepoint and
+      // fails closed (managed) when the profile is undetermined.
+      if (isManagedRuntimeProfile(runtimeProfile)) {
+        return sections.filter((section) => section.id !== 'orchestration')
+      }
+      return sections
+    },
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- activeLocale is read implicitly by the translate() calls inside buildSettingsNavigationMetadata; without it the memo keeps the previous language's sections.
     [
       isMac,
@@ -677,7 +691,8 @@ export function useSettingsNavigationMetadata(): SettingsNavSection[] {
       isWebClient,
       isLinearConnected,
       repos,
-      activeLocale
+      activeLocale,
+      runtimeProfile
     ]
   )
 }

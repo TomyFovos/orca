@@ -25,6 +25,7 @@ import { toFeatureWallAssetUrl, useFeatureWallAssetBaseUrl } from './feature-wal
 import { useFeatureWallTaskSourcePresentation } from './use-feature-wall-task-source-presentation'
 import { useFeatureWallCompletion } from './use-feature-wall-completion'
 import { useFeatureWallTourTelemetry } from './use-feature-wall-tour-telemetry'
+import { useFeatureWallWorkflows } from './use-feature-wall-workflows'
 import { FeatureWallContinueButton } from './FeatureWallContinueButton'
 import { FeatureWallTourPanel } from './FeatureWallTourPanel'
 import { getFeatureWallActiveStepCopy } from './feature-wall-active-step-copy'
@@ -73,15 +74,17 @@ export function FeatureWallTourSurface({
   )
   const railRefs = useRef<(HTMLButtonElement | null)[]>([])
 
+  const workflows = useFeatureWallWorkflows()
+
   const selectedIndex = useMemo(
     () =>
       Math.max(
         0,
-        FEATURE_WALL_WORKFLOWS.findIndex((w) => w.id === selectedId)
+        workflows.findIndex((w) => w.id === selectedId)
       ),
-    [selectedId]
+    [selectedId, workflows]
   )
-  const selected = FEATURE_WALL_WORKFLOWS[selectedIndex]
+  const selected = workflows[selectedIndex]
   const taskSourcePresentation = useFeatureWallTaskSourcePresentation(isOpen, selected)
   const selectedPresentation = taskSourcePresentation.workflow
   const agentsSteps = useMemo(() => getAgentsSteps(), [])
@@ -253,10 +256,11 @@ export function FeatureWallTourSurface({
 
   const handleRailKeyDown = useFeatureWallTourRailKeydown({
     railRefs,
-    onSelectWorkflow: handleSelect
+    onSelectWorkflow: handleSelect,
+    workflows
   })
 
-  const isLastWorkflow = selectedIndex >= FEATURE_WALL_WORKFLOWS.length - 1
+  const isLastWorkflow = selectedIndex >= workflows.length - 1
   const agentsStepIndex =
     selected.id === 'agents-orchestration'
       ? agentsSteps.findIndex((step) => step.id === agentsStepId)
@@ -324,7 +328,7 @@ export function FeatureWallTourSurface({
       }
       return
     }
-    const nextWorkflow = FEATURE_WALL_WORKFLOWS[selectedIndex + 1]
+    const nextWorkflow = workflows[selectedIndex + 1]
     if (nextWorkflow) {
       handleSelect(nextWorkflow)
       railRefs.current[selectedIndex + 1]?.focus()
@@ -349,7 +353,8 @@ export function FeatureWallTourSurface({
     source,
     workbenchStepId,
     workbenchStepIndex,
-    workbenchSteps
+    workbenchSteps,
+    workflows
   ])
 
   useFeatureWallTourKeyboardShortcut({
@@ -383,6 +388,7 @@ export function FeatureWallTourSurface({
       previewPanelId={previewPanelId}
       previewTitleId={previewTitleId}
       selected={selected}
+      workflows={workflows}
       description={description}
       activeStepCopy={activeStepCopy}
       completion={completion}

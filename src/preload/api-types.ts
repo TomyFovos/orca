@@ -28,6 +28,7 @@ import type {
 } from '../shared/local-log-tail-types'
 import type { ReadClipboardTextOptions } from '../shared/clipboard-text'
 import type { AppIdentity } from '../shared/app-identity'
+import type { OrcaRuntimeProfile } from '../shared/runtime-profile'
 import type { ReleaseChannel } from '../shared/release-channel'
 import type {
   HostQualifiedDetectedWorktreeResult,
@@ -1002,6 +1003,10 @@ export type AppApi = {
   writeTerminalRenderDesyncEvidence: (
     args: WriteTerminalRenderDesyncEvidenceArgs
   ) => Promise<WriteTerminalRenderDesyncEvidenceResult>
+  /** Synchronous read of the fixed startup runtime profile. The profile is
+   *  set once during main-process startup before any window is created, so a
+   *  blocking read is safe and avoids an undetermined-profile render gap. */
+  getRuntimeProfileSync: () => OrcaRuntimeProfile
 }
 
 /** Panel contribution as surfaced by the main-process plugin service. */

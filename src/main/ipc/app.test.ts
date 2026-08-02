@@ -83,6 +83,12 @@ vi.mock('electron', () => ({
   ipcMain: {
     handle: vi.fn((channel: string, handler: (_event: unknown, args?: unknown) => unknown) => {
       handlers.set(channel, handler)
+    }),
+    // Why: registerAppHandlers also registers a synchronous reader via ipcMain.on
+    // (app:getRuntimeProfileSync). Real Electron ipcMain exposes both handle and on,
+    // so the mock mirrors both and routes them through the same handler registry.
+    on: vi.fn((channel: string, handler: (_event: unknown, args?: unknown) => unknown) => {
+      handlers.set(channel, handler)
     })
   }
 }))
@@ -110,6 +116,11 @@ vi.mock('./renderer-shutdown-checkpoint', () => ({
 }))
 
 import { registerAppHandlers } from './app'
+import {
+  DEFAULT_ORCA_RUNTIME_PROFILE,
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  setProcessRuntimeProfile
+} from '../runtime/runtime-profile'
 
 describe('registerAppHandlers', () => {
   const originalPlatform = process.platform
@@ -138,6 +149,9 @@ describe('registerAppHandlers', () => {
     processKillSpy.mockRestore()
     vi.useRealTimers()
     Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+    // Why: the managed-profile test mutates the module-level process profile; restore the
+    // default so later tests in this file see the deterministic test fallback.
+    setProcessRuntimeProfile(DEFAULT_ORCA_RUNTIME_PROFILE)
   })
 
   it('registers the combined renderer shutdown checkpoint', () => {
@@ -146,6 +160,25 @@ describe('registerAppHandlers', () => {
     registerAppHandlers(store as never)
 
     expect(registerRendererShutdownCheckpointHandlerMock).toHaveBeenCalledWith(store)
+  })
+
+  it('exposes the runtime profile synchronously for the renderer bootstrap', () => {
+    registerAppHandlers({} as never)
+
+    const event = { returnValue: undefined as unknown }
+    handlers.get('app:getRuntimeProfileSync')?.(event)
+
+    expect(event.returnValue).toBe(DEFAULT_ORCA_RUNTIME_PROFILE)
+  })
+
+  it('returns the managed profile synchronously once startup has set it', () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    registerAppHandlers({} as never)
+
+    const event = { returnValue: undefined as unknown }
+    handlers.get('app:getRuntimeProfileSync')?.(event)
+
+    expect(event.returnValue).toBe(MANAGED_ORCA_RUNTIME_PROFILE)
   })
 
   it('marks relaunch as expected shutdown before exiting', async () => {

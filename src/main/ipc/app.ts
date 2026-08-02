@@ -15,6 +15,7 @@ import { isGitBashAvailable } from '../git-bash'
 import { setUnreadDockBadgeCount } from '../dock/unread-badge'
 import { destroySystemTray } from '../tray/system-tray'
 import { authorizeExternalPath } from './filesystem-auth'
+import { getProcessRuntimeProfile } from '../runtime/runtime-profile'
 import {
   ensureDefaultFloatingWorkspacePath,
   grantFloatingWorkspaceDirectory,
@@ -244,6 +245,14 @@ export function registerAppHandlers(store: Store, options: RegisterAppHandlersOp
   registerRendererShutdownCheckpointHandler(store)
 
   ipcMain.handle('app:getFeatureWallAssetBaseUrl', (): string => getFeatureWallAssetBaseUrl())
+
+  // Why: the renderer needs the fixed startup profile synchronously to avoid
+  // rendering orchestration surfaces during an async gap in managed mode.
+  // The profile is set once before any window is created, so a blocking read
+  // is safe (same pattern as settings:get-sync).
+  ipcMain.on('app:getRuntimeProfileSync', (event) => {
+    event.returnValue = getProcessRuntimeProfile()
+  })
 
   ipcMain.handle('app:getIdentity', (): AppIdentity => {
     const identity = getDevInstanceIdentity(is.dev)

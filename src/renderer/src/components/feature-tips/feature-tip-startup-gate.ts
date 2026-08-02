@@ -1,10 +1,12 @@
 import type { FeatureTipId } from '../../../../shared/feature-tips'
 import {
+  filterFeatureTipsForRuntimeProfile,
   getCompletedFeatureTipIds,
   getOrderedUnseenFeatureTips
 } from '../../../../shared/feature-tips'
 import type { CliInstallStatus } from '../../../../shared/cli-install-types'
 import type { FeatureInteractionState } from '../../../../shared/feature-interactions'
+import type { OrcaRuntimeProfile } from '../../../../shared/runtime-profile'
 import type { GlobalSettings, OnboardingState } from '../../../../shared/types'
 import { shouldShowOnboarding } from '../onboarding/should-show-onboarding'
 
@@ -27,6 +29,7 @@ export function getFeatureTipsAppOpenDecision(args: {
   onboarding: OnboardingState | null
   persistedUIReady: boolean
   promptedThisSession: boolean
+  runtimeProfile: OrcaRuntimeProfile
   settings: { voice?: GlobalSettings['voice'] } | null | undefined
   suppressedByOnboardingThisSession: boolean
 }): FeatureTipsAppOpenDecision {
@@ -55,7 +58,10 @@ export function getFeatureTipsAppOpenDecision(args: {
       featureInteractions: args.featureInteractions
     })
   })
+  // Why: in managed execution the orchestration tip is removed from the
+  // catalog, so it can never win the "next unseen tip" race.
+  const visibleUnseenTips = filterFeatureTipsForRuntimeProfile(args.runtimeProfile, unseenTips)
 
-  const nextTip = unseenTips[0]
+  const nextTip = visibleUnseenTips[0]
   return nextTip ? { kind: 'open', tipId: nextTip.id } : { kind: 'skip' }
 }
