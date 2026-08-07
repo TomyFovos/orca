@@ -1,7 +1,8 @@
 import { describe, it, expect, beforeAll } from 'vitest'
 import { generateKeyPairSync, sign } from 'node:crypto'
-import { verifyEd25519Signature, type SignedEnvelope } from '../crypto'
+import { verifyEd25519Signature } from '../crypto'
 import { canonicalBytes } from '../canonical'
+import type { SignedEnvelope } from '../issuer'
 
 describe('verifyEd25519Signature (実鍵テスト)', () => {
   let keyPair: { publicKey: string; privateKey: string }
@@ -62,9 +63,15 @@ describe('verifyEd25519Signature (実鍵テスト)', () => {
     const envelope = createValidEnvelope()
 
     // binding の1フィールドを改竄
-    envelope.binding.request_id = '550e8400-e29b-41d4-a716-446655440001' // 最後の文字を変更
+    const tamperedEnvelope: SignedEnvelope = {
+      ...envelope,
+      binding: {
+        ...envelope.binding,
+        request_id: '550e8400-e29b-41d4-a716-446655440001' // 最後の文字を変更
+      }
+    }
 
-    const isValid = verifyEd25519Signature(envelope, keyPair.publicKey)
+    const isValid = verifyEd25519Signature(tamperedEnvelope, keyPair.publicKey)
     expect(isValid).toBe(false)
   })
 

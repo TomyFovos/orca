@@ -28,8 +28,6 @@ export type ExternalControlPlaneAuthorityBinding = Readonly<{
   payload_digest: string
   protocol_version: string
   schema_version: string
-  issued_at: string
-  expires_at: string
 }>
 
 /**

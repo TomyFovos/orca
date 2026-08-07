@@ -86,10 +86,16 @@ describe('issuer', () => {
 
   test('負試験2: authority_id 未登録 → UNKNOWN_AUTHORITY_ID', () => {
     const request = createValidRequest()
-    request.envelope.binding.authority_id = 'unknown-authority'
-    expect(() => mintAuthorization(request)).toThrow(IssuerError)
+    const tamperedRequest: ExecuteRequest = {
+      ...request,
+      envelope: {
+        ...request.envelope,
+        binding: { ...request.envelope.binding, authority_id: 'unknown-authority' }
+      }
+    }
+    expect(() => mintAuthorization(tamperedRequest)).toThrow(IssuerError)
     try {
-      mintAuthorization(request)
+      mintAuthorization(tamperedRequest)
     } catch (error) {
       expect(error).toBeInstanceOf(IssuerError)
       expect((error as IssuerError).code).toBe(IssuerErrorCode.UNKNOWN_AUTHORITY_ID)
@@ -111,10 +117,19 @@ describe('issuer', () => {
 
   test('負試験4: payload_digest 不一致 → PAYLOAD_DIGEST_MISMATCH', () => {
     const request = createValidRequest()
-    request.envelope.binding.payload_digest = `sha256:${'f'.repeat(64)}` // 不正な digest
-    expect(() => mintAuthorization(request)).toThrow(IssuerError)
+    const tamperedRequest: ExecuteRequest = {
+      ...request,
+      envelope: {
+        ...request.envelope,
+        binding: {
+          ...request.envelope.binding,
+          payload_digest: `sha256:${'f'.repeat(64)}` // 不正な digest
+        }
+      }
+    }
+    expect(() => mintAuthorization(tamperedRequest)).toThrow(IssuerError)
     try {
-      mintAuthorization(request)
+      mintAuthorization(tamperedRequest)
     } catch (error) {
       expect(error).toBeInstanceOf(IssuerError)
       expect((error as IssuerError).code).toBe(IssuerErrorCode.PAYLOAD_DIGEST_MISMATCH)

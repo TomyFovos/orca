@@ -44,9 +44,7 @@ function createSignedRequest(): ExecuteRequest {
     operation: 'start',
     payload_digest: sha256Canonical(operationPayload),
     protocol_version: 'ai-de-trusted-launcher/1',
-    schema_version: 'execution-envelope-1',
-    issued_at: issuedAt.toISOString(),
-    expires_at: expiresAt.toISOString()
+    schema_version: 'execution-envelope-1'
   }
   const signature = sign(null, canonicalBytes(binding), keyPair.privateKey)
 
@@ -116,6 +114,18 @@ async function postExecute(port: number, request: ExecuteRequest) {
   }
 }
 
+async function postRawExecute(port: number, body: string) {
+  const response = await fetch(`http://127.0.0.1:${port}/execute`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body
+  })
+  return {
+    status: response.status,
+    body: await response.json()
+  }
+}
+
 describe('managed execution endpoint authorization path', () => {
   afterEach(() => {
     setProcessRuntimeProfile('default')
@@ -156,6 +166,38 @@ describe('managed execution endpoint authorization path', () => {
         backend_kind: 'orca'
       })
       expect(receipt.error).toBeUndefined()
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects malformed request shapes before issuer dereferences nullable fields', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    const server = startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+
+    await new Promise<void>((resolve, reject) => {
+      server!.once('listening', resolve)
+      server!.once('error', reject)
+    })
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const nullNested = await postRawExecute(
+        port,
+        JSON.stringify({ envelope: null, operation_payload: null })
+      )
+      expect(nullNested.status).toBe(400)
+      expect(nullNested.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
+
+      const invalidJson = await postRawExecute(port, '{"envelope":')
+      expect(invalidJson.status).toBe(400)
+      expect(invalidJson.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
     } finally {
       await closeServer(server!)
     }

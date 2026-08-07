@@ -27,11 +27,18 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
       return
     }
 
-    let request: ExecuteRequest | null = null
+    let request: ExecuteRequest | undefined
 
     try {
       const body = await readBody(req)
-      request = JSON.parse(body)
+      const parsedRequest = parseExecuteRequest(JSON.parse(body))
+      if (!parsedRequest) {
+        console.error('[managed-execution] Malformed request: invalid request shape')
+        res.writeHead(400, { 'Content-Type': 'application/json' })
+        res.end(JSON.stringify({ error: { code: IssuerErrorCode.MALFORMED_REQUEST } }))
+        return
+      }
+      request = parsedRequest
 
       // 検証と capability mint
       const authorization = mintAuthorization(request)
@@ -114,6 +121,65 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
   })
 
   return server
+}
+
+type JsonRecord = Record<string, unknown>
+
+function isRecord(value: unknown): value is JsonRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === 'string'
+}
+
+function parseExecuteRequest(value: unknown): ExecuteRequest | null {
+  if (!isRecord(value) || !isRecord(value.envelope) || !isRecord(value.operation_payload)) {
+    return null
+  }
+
+  const envelope = value.envelope
+  const operationPayload = value.operation_payload
+  if (!isRecord(envelope.binding) || !isRecord(envelope.signature) || !isRecord(envelope.payload)) {
+    return null
+  }
+
+  const binding = envelope.binding
+  const signature = envelope.signature
+  const bindingStringFields = [
+    'authority_id',
+    'operation',
+    'request_id',
+    'case_id',
+    'task_id',
+    'attempt_id',
+    'packet_digest',
+    'payload_digest',
+    'protocol_version',
+    'schema_version'
+  ] as const
+  const operationPayloadStringFields = [
+    'case_id',
+    'task_id',
+    'attempt_id',
+    'packet_digest'
+  ] as const
+
+  if (
+    envelope.schema !== 'ai-de.execution-envelope/1' ||
+    !isString(envelope.issued_at) ||
+    !isString(envelope.expires_at) ||
+    signature.algorithm !== 'ed25519' ||
+    signature.canonicalization !== 'RFC8785-JCS' ||
+    !isString(signature.value) ||
+    !bindingStringFields.every((field) => isString(binding[field])) ||
+    !(binding.launch_plan_digest === null || isString(binding.launch_plan_digest)) ||
+    !operationPayloadStringFields.every((field) => isString(operationPayload[field]))
+  ) {
+    return null
+  }
+
+  return value as unknown as ExecuteRequest
 }
 
 function readBody(req: IncomingMessage): Promise<string> {
