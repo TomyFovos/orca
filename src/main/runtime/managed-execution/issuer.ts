@@ -14,6 +14,7 @@ const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
 type MintedRequest = {
   request_id: string
   expires_at: string
+  bindingCanonical: string
 }
 
 const mintedRequests = new Map<string, MintedRequest>()
@@ -53,6 +54,7 @@ export enum IssuerErrorCode {
   INVALID_BINDING = 'INVALID_BINDING',
   PAYLOAD_DIGEST_MISMATCH = 'PAYLOAD_DIGEST_MISMATCH',
   REPLAY_ATTACK = 'REPLAY_ATTACK',
+  REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD = 'REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD',
   UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
   MALFORMED_REQUEST = 'MALFORMED_REQUEST'
 }
@@ -110,7 +112,15 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   }
 
   // 7. request_id の単回使用を検証（リプレイ防御）
-  if (mintedRequests.has(envelope.binding.request_id)) {
+  const bindingCanonical = canonicalBytes(envelope.binding).toString('utf8')
+  const existingRequest = mintedRequests.get(envelope.binding.request_id)
+  if (existingRequest) {
+    if (existingRequest.bindingCanonical !== bindingCanonical) {
+      throw new IssuerError(
+        IssuerErrorCode.REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD,
+        'request_id was reused with different payload'
+      )
+    }
     logReplayAttempt(envelope.binding.request_id)
     throw new IssuerError(IssuerErrorCode.REPLAY_ATTACK, 'request_id already used')
   }
@@ -121,7 +131,8 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   // 9. request_id を記録
   mintedRequests.set(envelope.binding.request_id, {
     request_id: envelope.binding.request_id,
-    expires_at: envelope.expires_at
+    expires_at: envelope.expires_at,
+    bindingCanonical
   })
 
   return authorization

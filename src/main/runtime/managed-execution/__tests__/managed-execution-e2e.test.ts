@@ -24,18 +24,18 @@ function sha256Canonical(value: unknown): string {
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 }
 
-function createSignedRequest(): ExecuteRequest {
+function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = ''): ExecuteRequest {
   const issuedAt = new Date()
   const expiresAt = new Date(issuedAt.getTime() + 60_000)
   const operationPayload = {
-    case_id: 'managed-e2e-case',
-    task_id: 'managed-e2e-task',
-    attempt_id: 'managed-e2e-attempt',
+    case_id: `managed-e2e-case${payloadSuffix}`,
+    task_id: `managed-e2e-task${payloadSuffix}`,
+    attempt_id: `managed-e2e-attempt${payloadSuffix}`,
     packet_digest: `sha256:${'0'.repeat(64)}`
   }
   const binding = {
     authority_id: 'managed-e2e-authority',
-    request_id: randomUUID(),
+    request_id: requestId,
     case_id: operationPayload.case_id,
     task_id: operationPayload.task_id,
     attempt_id: operationPayload.attempt_id,
@@ -235,12 +235,8 @@ describe('managed execution endpoint authorization path', () => {
       const acceptedValidation = await validateWithAiDe(accepted.receipt, 'accepted-orca')
 
       const replayed = await postExecute(port, acceptedRequest)
-      expect(replayed.status).toBe(400)
-      expect(replayed.receipt).toMatchObject({
-        schema: 'ai-de.execution-receipt/1',
-        outcome: 'replayed',
-        backend_kind: 'orca'
-      })
+      expect(replayed.status).toBe(200)
+      expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
       const replayedValidation = await validateWithAiDe(replayed.receipt, 'replayed-orca')
 
       const rejectedRequest = createSignedRequest()
@@ -258,6 +254,57 @@ describe('managed execution endpoint authorization path', () => {
       console.log(
         `[AI-DE validator] accepted=${acceptedValidation}; replayed=${replayedValidation}; rejected=${rejectedValidation}`
       )
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('replays the stored receipt without a second effect and denies a different payload', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    getAuthorityRegistry().set('managed-e2e-authority', {
+      publicKey: keyPair.publicKey,
+      revoked: false
+    })
+
+    let protectedEffectCalls = 0
+    const server = startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+
+    await new Promise<void>((resolve, reject) => {
+      server!.once('listening', resolve)
+      server!.once('error', reject)
+    })
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const acceptedRequest = createSignedRequest()
+      const accepted = await postExecute(port, acceptedRequest)
+      expect(accepted.status).toBe(200)
+
+      const replayed = await postExecute(port, acceptedRequest)
+      expect(replayed.status).toBe(200)
+      expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
+
+      const differentPayload = createSignedRequest(
+        acceptedRequest.envelope.binding.request_id,
+        '-different-payload'
+      )
+      const rejected = await postExecute(port, differentPayload)
+      expect(rejected.status).toBe(400)
+      expect(rejected.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD'
+      })
+      expect(protectedEffectCalls).toBe(1)
     } finally {
       await closeServer(server!)
     }

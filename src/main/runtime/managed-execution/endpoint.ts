@@ -9,7 +9,36 @@ const DEFAULT_HOST = '127.0.0.1'
 export type EndpointConfig = {
   host?: string
   port?: number
+  onProtectedEffect?: (request: ExecuteRequest) => void
 }
+
+type ExecutionReceipt = {
+  schema: 'ai-de.execution-receipt/1'
+  request_id: string
+  operation: string
+  case_id: string
+  task_id: string
+  attempt_id: string
+  protocol_version: string
+  schema_version: string
+  outcome: 'accepted' | 'replayed' | 'rejected'
+  backend_kind: 'orca'
+  backend_ref: string | null
+  backend_session_id: string | null
+  reject_reason?: IssuerErrorCode
+  accepted_at: string
+}
+
+type StoredAcceptedReceipt = {
+  expires_at: string
+  receipt: ExecutionReceipt & {
+    outcome: 'accepted'
+    backend_ref: string
+    backend_session_id: string
+  }
+}
+
+const completedReceipts = new Map<string, StoredAcceptedReceipt>()
 
 export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Server | null {
   // managed profile でのみ listen
@@ -19,6 +48,7 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
 
   const host = config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_HOST
   const port = config.port ?? (Number(process.env.ORCA_MANAGED_ENDPOINT_PORT) || DEFAULT_PORT)
+  const onProtectedEffect = config.onProtectedEffect
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'POST' || req.url !== '/execute') {
@@ -30,6 +60,7 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
     let request: ExecuteRequest | undefined
 
     try {
+      cleanupExpiredReceipts()
       const body = await readBody(req)
       const parsedRequest = parseExecuteRequest(JSON.parse(body))
       if (!parsedRequest) {
@@ -46,9 +77,10 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
       // 保護された効果を実行（この例では何もしない）
       // 実際には operation に応じた処理を行う
       assertManagedExecutionAuthorized(request.envelope.binding.operation, authorization)
+      onProtectedEffect?.(request)
 
       // 成功応答（execution-receipt/1 準拠、outcome=accepted）
-      const receipt = {
+      const receipt: StoredAcceptedReceipt['receipt'] = {
         schema: 'ai-de.execution-receipt/1',
         request_id: request.envelope.binding.request_id,
         operation: request.envelope.binding.operation,
@@ -64,6 +96,11 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
         accepted_at: new Date().toISOString()
       }
 
+      completedReceipts.set(request.envelope.binding.request_id, {
+        expires_at: request.envelope.expires_at,
+        receipt
+      })
+
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(receipt))
     } catch (error) {
@@ -71,10 +108,27 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
         // エラー応答も receipt 形式（execution-receipt/1 準拠）
         console.error(`[managed-execution] Request rejected: code=${error.code}`)
 
-        const isReplay = error.code === IssuerErrorCode.REPLAY_ATTACK
-        const outcome = isReplay ? 'replayed' : 'rejected'
+        if (error.code === IssuerErrorCode.REPLAY_ATTACK) {
+          const stored = completedReceipts.get(request.envelope.binding.request_id)
+          if (!stored) {
+            console.error(
+              `[managed-execution] Replay receipt missing: request_id=${request.envelope.binding.request_id}`
+            )
+            res.writeHead(500, { 'Content-Type': 'application/json' })
+            res.end(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }))
+            return
+          }
 
-        const receipt = {
+          const replayedReceipt: ExecutionReceipt = {
+            ...stored.receipt,
+            outcome: 'replayed'
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' })
+          res.end(JSON.stringify(replayedReceipt))
+          return
+        }
+
+        const receipt: ExecutionReceipt = {
           schema: 'ai-de.execution-receipt/1',
           request_id: request.envelope.binding.request_id,
           operation: request.envelope.binding.operation,
@@ -83,11 +137,11 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
           attempt_id: request.envelope.binding.attempt_id,
           protocol_version: request.envelope.binding.protocol_version,
           schema_version: request.envelope.binding.schema_version,
-          outcome,
+          outcome: 'rejected',
           backend_kind: 'orca',
-          backend_ref: isReplay ? 'orca-backend-1' : null,
-          backend_session_id: isReplay ? `session-${Date.now()}` : null,
-          reject_reason: isReplay ? undefined : error.code,
+          backend_ref: null,
+          backend_session_id: null,
+          reject_reason: error.code,
           accepted_at: new Date().toISOString()
         }
 
@@ -121,6 +175,15 @@ export function startManagedExecutionEndpoint(config: EndpointConfig = {}): Serv
   })
 
   return server
+}
+
+function cleanupExpiredReceipts() {
+  const now = Date.now()
+  for (const [requestId, stored] of completedReceipts.entries()) {
+    if (new Date(stored.expires_at).getTime() < now) {
+      completedReceipts.delete(requestId)
+    }
+  }
 }
 
 type JsonRecord = Record<string, unknown>
