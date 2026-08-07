@@ -3,10 +3,21 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import type { Repo } from '../../shared/types'
+import type { Automation, AutomationRun } from '../../shared/automations-types'
 import { toRuntimeExecutionHostId } from '../../shared/execution-host'
+import type { AutomationRunTargetResult } from './run-target-resolution'
+import { setProcessRuntimeProfile } from '../runtime/runtime-profile'
 import { AutomationService } from './service'
 
 const testState = { dir: '' }
+
+type HeadlessDispatchAccess = {
+  requestHeadlessDispatch(
+    automation: Automation,
+    run: AutomationRun,
+    target: Extract<AutomationRunTargetResult, { ok: true }>
+  ): Promise<AutomationRun>
+}
 
 vi.mock('electron', () => ({
   app: {
@@ -42,6 +53,7 @@ describe('AutomationService', () => {
   })
 
   afterEach(() => {
+    setProcessRuntimeProfile('default')
     vi.useRealTimers()
     rmSync(testState.dir, { recursive: true, force: true })
   })
@@ -119,6 +131,68 @@ describe('AutomationService', () => {
         run: expect.objectContaining({ id: run.id, status: 'dispatching' })
       })
     )
+  })
+
+  it('rejects a managed automation run before renderer worker dispatch', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Managed manual check',
+      prompt: 'Check the repo',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    })
+    const send = vi.fn()
+    const service = new AutomationService(store, { tickMs: 60_000 })
+    service.setWebContents({
+      isDestroyed: () => false,
+      send
+    } as never)
+    service.setRendererReady()
+    setProcessRuntimeProfile('managed')
+
+    await expect(service.runNow(automation.id)).rejects.toMatchObject({
+      code: 'managed_execution_authorization_required'
+    })
+
+    expect(send).not.toHaveBeenCalled()
+    expect(store.listAutomationRuns(automation.id)[0]?.status).toBe('pending')
+  })
+
+  it('rejects a managed headless callback at the worker side-effect boundary', async () => {
+    vi.setSystemTime(new Date('2026-05-13T08:00:00Z'))
+    const store = await createStore()
+    store.addRepo(makeRepo())
+    const automation = store.createAutomation({
+      name: 'Managed headless check',
+      prompt: 'Check the repo',
+      agentId: 'claude',
+      projectId: 'r1',
+      workspaceMode: 'existing',
+      workspaceId: 'wt1',
+      timezone: 'UTC',
+      rrule: 'FREQ=DAILY;BYHOUR=9;BYMINUTE=0',
+      dtstart: new Date('2026-05-14T00:00:00Z').getTime()
+    })
+    const headlessDispatcher = vi.fn()
+    const service = new AutomationService(store, { headlessDispatcher })
+    const run = store.createAutomationRun(automation, Date.now(), 'manual')
+    setProcessRuntimeProfile('managed')
+
+    const result = await (service as unknown as HeadlessDispatchAccess).requestHeadlessDispatch(
+      automation,
+      run,
+      { ok: true, cwd: '/repo', repo: store.getRepo('r1')! }
+    )
+
+    expect(result.status).toBe('dispatch_failed')
+    expect(headlessDispatcher).not.toHaveBeenCalled()
   })
 
   it('skips dispatch when the selected project host setup is gone', async () => {

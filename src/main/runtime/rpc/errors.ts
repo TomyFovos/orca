@@ -91,6 +91,7 @@ const STRUCTURED_RUNTIME_PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
   'mutation_ledger_full',
   'legacy_read_only',
   'orchestration_migration_required',
+  'managed_execution_authorization_required',
   'operation_unknown',
   'question_not_found',
   'answer_conflict',

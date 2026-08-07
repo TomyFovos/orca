@@ -70,6 +70,7 @@ import {
   resolveOrcaRuntimeProfileAtStartup,
   setProcessRuntimeProfile
 } from './runtime/runtime-profile'
+import { assertManagedExecutionAuthorized } from './runtime/managed-execution/authorization'
 import { loadAgentSessionClaimSigner } from './runtime/agent-session-claim-identity'
 import {
   fingerprintOrchestrationPeer,
@@ -2368,6 +2369,10 @@ void app.whenReady().then(async () => {
     allowRemoteHostScheduling: isServeMode,
     headlessDispatcher: isServeMode
       ? async ({ automation, run, target }) => {
+          // Why: this callback launches the worker directly in serve mode, so
+          // enforce the same managed-control-plane boundary even if a future
+          // service path reaches it without AutomationService.requestDispatch.
+          assertManagedExecutionAuthorized('automation worker startup')
           const terminalSnapshotLimit = 2_000
           let terminalHandle: string
           let terminalSessionId: string | null = null

@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { SkillUpdateRun } from '../../shared/skill-freshness'
+import { setProcessRuntimeProfile } from '../runtime/runtime-profile'
 import {
   getSpawnArgsForWindows,
   WINDOWS_BATCH_UNSAFE_CHARACTERS_LABEL
@@ -46,6 +47,10 @@ async function flush(): Promise<void> {
 }
 
 describe('SkillUpdateRunner', () => {
+  afterEach(() => {
+    setProcessRuntimeProfile('default')
+  })
+
   it('passes both non-interactive flags and the sorted skill names', () => {
     const { runner, spawnCalls } = makeRunner()
 
@@ -62,6 +67,30 @@ describe('SkillUpdateRunner', () => {
       '--global',
       '-y'
     ])
+  })
+
+  it('skips orchestration delivery but updates other skills in managed mode', () => {
+    setProcessRuntimeProfile('managed')
+    const { runner, spawnCalls } = makeRunner()
+
+    expect(runner.start(['orchestration', 'orca-cli'])).toEqual({
+      started: true,
+      skippedNames: ['orchestration']
+    })
+    expect(spawnCalls).toHaveLength(1)
+    expect(spawnCalls[0].args).toEqual(['--yes', 'skills', 'update', 'orca-cli', '--global', '-y'])
+  })
+
+  it('does not spawn when orchestration is the only managed skill request', () => {
+    setProcessRuntimeProfile('managed')
+    const { runner, spawnCalls } = makeRunner()
+
+    expect(runner.start(['orchestration'])).toEqual({
+      started: false,
+      reason: 'no-eligible-names',
+      skippedNames: ['orchestration']
+    })
+    expect(spawnCalls).toHaveLength(0)
   })
 
   it('ignores stdin so the CLI sees a non-TTY', () => {

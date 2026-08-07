@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { isOrchestrationMutation } from '../../../shared/orchestration-rpc-contract'
+import { assertManagedExecutionAuthorized } from '../managed-execution/authorization'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationError } from '../orchestration/orchestration-error'
 import type { RpcRequest } from './core'
@@ -26,7 +27,13 @@ export class OrchestrationMutationExecutor {
     callerFingerprintOverride?: string
   ): Promise<unknown> {
     const requestId = request.orchestrationRequestId
-    if (!requestId || !isOrchestrationMutation(request.method, params)) {
+    const isMutation = isOrchestrationMutation(request.method, params)
+    if (isMutation) {
+      // Why: caller metadata is serializable, so only a future process-local
+      // external-control-plane capability may authorize managed mutations.
+      assertManagedExecutionAuthorized('orchestration task or dispatch mutation')
+    }
+    if (!requestId || !isMutation) {
       return await invoke()
     }
     const callerFingerprint = callerFingerprintOverride ?? authenticatedCallerFingerprint(request)

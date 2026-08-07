@@ -58,12 +58,14 @@ export function isOrchestrationMutation(method: string, params: unknown): boolea
   return ORCHESTRATION_MUTATION_METHODS.has(method)
 }
 
-export function orchestrationSkillRecoveryData(): {
+export type OrchestrationSkillRecoveryData = {
   effectsApplied: false
   guide: { topic: 'orchestration'; full: true }
   nextCommandArgs: typeof ORCHESTRATION_SKILL_COMMAND_ARGS
   nextSteps: string[]
-} {
+}
+
+export function orchestrationSkillRecoveryData(): OrchestrationSkillRecoveryData {
   return {
     effectsApplied: false,
     guide: { topic: 'orchestration', full: true },
@@ -75,12 +77,33 @@ export function orchestrationSkillRecoveryData(): {
   }
 }
 
-export function orchestrationMigrationData(reason: OrchestrationMigrationReason): ReturnType<
-  typeof orchestrationSkillRecoveryData
-> & {
+export type OrchestrationMigrationData = {
   reason: OrchestrationMigrationReason
   requiredContractVersion: number
-} {
+  effectsApplied: false
+  nextSteps: string[]
+  guide?: { topic: 'orchestration'; full: true }
+  nextCommandArgs?: typeof ORCHESTRATION_SKILL_COMMAND_ARGS
+}
+
+export function orchestrationMigrationData(
+  reason: OrchestrationMigrationReason,
+  options: { includeSkillRecovery?: boolean } = {}
+): OrchestrationMigrationData {
+  // Why: a managed runtime must not hand a worker the orchestration skill
+  // retrieval command as a recovery action. The caller decides this at the
+  // execution boundary; the default preserves legacy callers and CLI output.
+  if (options.includeSkillRecovery === false) {
+    return {
+      reason,
+      requiredContractVersion: ORCHESTRATION_CONTRACT_VERSION,
+      effectsApplied: false,
+      nextSteps: [
+        'This managed runtime does not expose orchestration skill recovery.',
+        'Contact the external control plane before attempting another orchestration mutation.'
+      ]
+    }
+  }
   return {
     reason,
     requiredContractVersion: ORCHESTRATION_CONTRACT_VERSION,

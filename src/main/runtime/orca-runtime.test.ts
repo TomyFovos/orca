@@ -123,6 +123,7 @@ import {
   setTerminalViewAttributes
 } from './terminal-view-attribute-store'
 import { clearConfiguredWorktreeSharedDirectoriesCacheForTests } from '../git/worktree-shared-directories'
+import { setProcessRuntimeProfile } from './runtime-profile'
 
 const ORIGINAL_PLATFORM = process.platform
 const ORIGINAL_PLATFORM_DESCRIPTOR = Object.getOwnPropertyDescriptor(process, 'platform')
@@ -623,6 +624,7 @@ vi.mock('../git/git-username', async () => {
 })
 
 function resetRuntimeTestMocks(): void {
+  setProcessRuntimeProfile('default')
   resetPlatform()
   electronMocks.app.isPackaged = false
   clearConfiguredWorktreeSharedDirectoriesCacheForTests()
@@ -12969,6 +12971,43 @@ describe('OrcaRuntimeService', () => {
     expect(normalAgent.command).toBe("codex '--dangerously-bypass-approvals-and-sandbox'")
     expect(normalAgent.env?.CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS).toBeUndefined()
     expect(normalAgent.env?.TMUX).toBeUndefined()
+  })
+
+  it('rejects Claude Agent Teams startup before creating its launch plan in managed mode', async () => {
+    setProcessRuntimeProfile('managed')
+    const spawn = vi.fn().mockResolvedValue({ id: 'pty-bg' })
+    const runtimeStore = {
+      ...store,
+      getSettings: () => ({
+        ...store.getSettings(),
+        claudeAgentTeamsMode: 'in-process' as const
+      })
+    }
+    const runtime = new OrcaRuntimeService(runtimeStore)
+    runtime.setPtyController({
+      spawn,
+      write: () => true,
+      kill: () => true,
+      getForegroundProcess: async () => null
+    })
+
+    await expect(
+      runtime.createTerminal(`path:${TEST_WORKTREE_PATH}`, { command: "claude 'hello'" })
+    ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
+
+    expect(spawn).not.toHaveBeenCalled()
+  })
+
+  it('rejects Claude Agent Teams tmux compatibility and shim preparation in managed mode', async () => {
+    setProcessRuntimeProfile('managed')
+    const runtime = new OrcaRuntimeService(store)
+
+    await expect(runtime.handleAgentTeamsTmuxCompat({} as never)).rejects.toMatchObject({
+      code: 'managed_execution_authorization_required'
+    })
+    await expect(
+      runtime.prepareClaudeAgentTeamsLeaderForHandle({ handle: 'terminal:leader' })
+    ).rejects.toMatchObject({ code: 'managed_execution_authorization_required' })
   })
 
   it('reveals Claude Agent Teams launches with the rewritten launch config', async () => {
@@ -41086,6 +41125,17 @@ describe('OrcaRuntimeService', () => {
       getSshProvider: () => emptyPtyProvider as never
     })
   }
+
+  it('rejects managed worktree removal before teardown begins', async () => {
+    setProcessRuntimeProfile('managed')
+    const runtime = createWorktreeRemovalRuntime()
+
+    await expect(runtime.removeManagedWorktree(TEST_WORKTREE_ID)).rejects.toMatchObject({
+      code: 'managed_execution_authorization_required'
+    })
+
+    expect(removeWorktree).not.toHaveBeenCalled()
+  })
 
   it('skips archive hooks for CLI worktree removal by default', async () => {
     const runtime = createWorktreeRemovalRuntime()

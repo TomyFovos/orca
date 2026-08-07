@@ -15,6 +15,7 @@ import { resolveAutomationRunTarget, type AutomationRunTargetResult } from './ru
 import { collectAutomationRunUsage } from './run-usage-collection'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import { clearAutomationDispatchTokens, createAutomationDispatchToken } from './dispatch-tokens'
+import { assertManagedExecutionAuthorized } from '../runtime/managed-execution/authorization'
 import {
   didAutomationPrecheckPass,
   formatAutomationPrecheckFailure
@@ -211,6 +212,11 @@ export class AutomationService {
     automation: Automation,
     run: AutomationRun
   ): Promise<AutomationRun> {
+    // Why: automation dispatch ultimately starts an agent. In managed mode the
+    // external control plane must supply the process-local capability at this
+    // side-effect boundary; renderer dispatch tokens are serializable and cannot
+    // authorize a worker launch.
+    assertManagedExecutionAuthorized('automation worker startup')
     const target = resolveAutomationRunTarget(this.store, automation, {
       allowRemoteHostScheduling: this.allowRemoteHostScheduling
     })
@@ -268,6 +274,10 @@ export class AutomationService {
       })
     }
     try {
+      // Why: retain this guard at the headless effect site as well. A future
+      // caller that bypasses requestDispatch must not silently regain a worker
+      // startup path in managed mode.
+      assertManagedExecutionAuthorized('automation worker startup')
       const launch = await this.headlessDispatcher!({ automation, run, target })
       const launchRunTarget = {
         workspaceId: launch.workspaceId,

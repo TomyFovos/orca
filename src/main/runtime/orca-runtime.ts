@@ -531,8 +531,13 @@ import type {
 import {
   buildClaudeAgentTeamsLaunchPlan,
   ensureClaudeAgentTeamsShimDir,
+  isClaudeAgentTeamsLaunchRequested,
   resolveClaudeAgentTeamsShimBin
 } from './claude-agent-teams-shim-env'
+import {
+  assertManagedExecutionAuthorized,
+  propagateManagedRuntimeProfile
+} from './managed-execution/authorization'
 import {
   addClaudeTeammateModeAuto,
   addClaudeTeammateModeInProcess,
@@ -23135,6 +23140,7 @@ export class OrcaRuntimeService {
     force = false,
     runHooks = false
   ): Promise<RemoveWorktreeResult & { warning?: string }> {
+    assertManagedExecutionAuthorized('managed worktree removal')
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -23837,6 +23843,7 @@ export class OrcaRuntimeService {
     request: RuntimeEnsureAgentSessionRequest,
     _caller: RuntimeAgentSessionRpcCaller = {}
   ): Promise<RuntimeEnsureAgentSessionResult> {
+    assertManagedExecutionAuthorized('target CLI startup')
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
       throw new Error('agent_session_resume_not_authorized')
@@ -23923,6 +23930,7 @@ export class OrcaRuntimeService {
     request: RuntimeCreateAgentSessionRequest,
     caller: RuntimeAgentSessionRpcCaller = {}
   ): Promise<RuntimeCreateAgentSessionResult> {
+    assertManagedExecutionAuthorized('target CLI startup')
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -24148,6 +24156,9 @@ export class OrcaRuntimeService {
     worktreeSelector?: string,
     opts: TerminalCreateOptions = {}
   ): Promise<RuntimeTerminalCreate> {
+    if (opts.launchAgent) {
+      assertManagedExecutionAuthorized('target CLI startup')
+    }
     const presentation = resolveTerminalPresentation(opts)
     const requiresRendererFocus = opts.presentation === 'focused' || opts.focus === true
     const availableAuthoritativeWindow = this.getAvailableAuthoritativeWindow()
@@ -24213,6 +24224,14 @@ export class OrcaRuntimeService {
         claudeAgentTeamsSourceCommand,
         claudeAgentTeamsMode
       )
+      if (
+        isClaudeAgentTeamsLaunchRequested({
+          command: claudeAgentTeamsSourceCommand,
+          mode: effectiveClaudeAgentTeamsMode
+        })
+      ) {
+        assertManagedExecutionAuthorized('Claude Agent Teams startup')
+      }
       const agentTeamsPlan = await buildClaudeAgentTeamsLaunchPlan({
         command: claudeAgentTeamsSourceCommand,
         mode: effectiveClaudeAgentTeamsMode,
@@ -24283,7 +24302,7 @@ export class OrcaRuntimeService {
         launchAgent: launchOpts.launchAgent,
         commandDelivery: 'provider',
         startupCommandDelivery: launchOpts.startupCommandDelivery,
-        env,
+        env: propagateManagedRuntimeProfile(env),
         envToDelete: mergeTerminalEnvDeletionKeys(
           launchOpts.envToDelete,
           agentTeamsPlan?.envToDelete
@@ -25853,6 +25872,7 @@ export class OrcaRuntimeService {
   async handleAgentTeamsTmuxCompat(
     request: AgentTeamsTmuxCompatRequest
   ): Promise<AgentTeamsTmuxCompatResponse> {
+    assertManagedExecutionAuthorized('Claude Agent Teams tmux compatibility')
     return await this.claudeAgentTeams.handleTmuxCompat(request, {
       splitTerminal: (handle, opts) => this.splitTerminal(handle, opts),
       readTerminal: (handle, opts) => this.readTerminal(handle, opts),
@@ -25867,6 +25887,7 @@ export class OrcaRuntimeService {
     paneKey: string
     baseEnv?: Record<string, string>
   }): Promise<{ env: Record<string, string> }> {
+    assertManagedExecutionAuthorized('Claude Agent Teams startup')
     const handle = this.getTerminalHandleForPaneKey(args.paneKey)
     if (!handle) {
       throw new Error('claude_agent_teams_requires_orca_terminal')
@@ -25881,6 +25902,7 @@ export class OrcaRuntimeService {
     handle: string
     baseEnv?: Record<string, string>
   }): Promise<{ env: Record<string, string> }> {
+    assertManagedExecutionAuthorized('Claude Agent Teams startup')
     const baseEnv = {
       ...process.env,
       ...args.baseEnv

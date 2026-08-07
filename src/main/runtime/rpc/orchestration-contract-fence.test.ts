@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationDb } from '../orchestration/db'
-import type { OrcaRuntimeProfile } from '../runtime-profile'
+import { setProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime-profile'
 import { defineMethod, type RpcRequest } from './core'
 import { RpcDispatcher } from './dispatcher'
 
@@ -15,6 +15,7 @@ describe('orchestration contract fence', () => {
     for (const database of databases.splice(0)) {
       database.close()
     }
+    setProcessRuntimeProfile('default')
   })
 
   function createHarness(method = 'orchestration.send', profile: OrcaRuntimeProfile = 'default') {
@@ -139,25 +140,35 @@ describe('orchestration contract fence', () => {
   })
 
   it('enforces the pre-effect fence in managed non-streaming dispatch before method filtering', async () => {
+    setProcessRuntimeProfile('managed')
     const { dispatcher, effect } = createHarness('orchestration.send', 'managed')
     const response = await dispatcher.dispatch(request())
 
     expect(response).toMatchObject({
       ok: false,
-      error: { code: 'orchestration_migration_required' }
+      error: {
+        code: 'orchestration_migration_required',
+        data: { reason: 'client_contract_missing', effectsApplied: false }
+      }
     })
+    expect(
+      (response as { error?: { data?: Record<string, unknown> } }).error?.data
+    ).not.toHaveProperty('nextCommandArgs')
     expect(effect).not.toHaveBeenCalled()
   })
 
   it('enforces the pre-effect fence in managed streaming dispatch before method filtering', async () => {
+    setProcessRuntimeProfile('managed')
     const { dispatcher, effect } = createHarness('orchestration.send', 'managed')
     const replies: string[] = []
     await dispatcher.dispatchStreaming(request(), (reply) => replies.push(reply))
 
-    expect(JSON.parse(replies[0] ?? '{}')).toMatchObject({
+    const response = JSON.parse(replies[0] ?? '{}')
+    expect(response).toMatchObject({
       ok: false,
       error: { code: 'orchestration_migration_required' }
     })
+    expect(response.error?.data).not.toHaveProperty('nextCommandArgs')
     expect(effect).not.toHaveBeenCalled()
   })
 })

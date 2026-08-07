@@ -60,6 +60,15 @@ vi.mock('./bundled-skill-guides.js', () => {
         markdown: '# Gamma\n',
         fullMarkdown: '# Gamma\n\n## References\n\nGamma reference.\n',
         aliases: []
+      },
+      {
+        // Keep the production-managed skill in this catalog: managed-mode
+        // coverage must exercise the same canonical name the CLI sees.
+        name: 'orchestration',
+        description: 'Coordinate work across agents.',
+        markdown: '# Orchestration\n',
+        fullMarkdown: '# Orchestration\n\n## References\n\nCoordination reference.\n',
+        aliases: []
       }
     ]
   }
@@ -139,6 +148,7 @@ describe('orca skills CLI', () => {
       'alpha: Use when alpha work is needed.\n' +
         'gamma: Use when gamma work spans several sentences describing exactly how a ' +
         'coding agent should decide whether gamma applies to the current task at hand.\n' +
+        'orchestration: Coordinate work across agents.\n' +
         'zeta: Use when zeta work spans lines.\n'
     )
     expect(runtimeClientConstructorMock).not.toHaveBeenCalled()
@@ -176,6 +186,7 @@ describe('orca skills CLI', () => {
                 'Use when gamma work spans several sentences describing exactly how a ' +
                 'coding agent should decide whether gamma applies to the current task at hand.'
             },
+            { name: 'orchestration', description: 'Coordinate work across agents.' },
             { name: 'zeta', description: 'Use when zeta work spans lines.' }
           ]
         },
@@ -237,7 +248,7 @@ describe('orca skills CLI', () => {
 
     expect(process.exitCode).toBe(1)
     expect(errorSpy).toHaveBeenCalledWith(
-      'Unknown skill topic "missing". Available topics: alpha, gamma, zeta'
+      'Unknown skill topic "missing". Available topics: alpha, gamma, orchestration, zeta'
     )
     expect(runtimeClientConstructorMock).not.toHaveBeenCalled()
   })
@@ -252,6 +263,7 @@ describe('orca skills CLI', () => {
         'Choose one or more skills to install:',
         '  alpha',
         '  gamma',
+        '  orchestration',
         '  zeta',
         '',
         'Usage: orca skills install --skill <name> [--skill <name> ...]',
@@ -269,7 +281,7 @@ describe('orca skills CLI', () => {
     await main(['skills', 'install', '--json'], '/tmp/repo')
 
     expect(stdoutText(stdoutSpy)).toBe(
-      `${JSON.stringify({ availableSkills: ['alpha', 'gamma', 'zeta'] }, null, 2)}\n`
+      `${JSON.stringify({ availableSkills: ['alpha', 'gamma', 'orchestration', 'zeta'] }, null, 2)}\n`
     )
   })
 
@@ -290,7 +302,7 @@ describe('orca skills CLI', () => {
 
     expect(process.exitCode).toBe(1)
     expect(errorSpy).toHaveBeenCalledWith(
-      'Unknown skill "missing". Available skills: alpha, gamma, zeta'
+      'Unknown skill "missing". Available skills: alpha, gamma, orchestration, zeta'
     )
     expect(spawnMock).not.toHaveBeenCalled()
   })
@@ -529,6 +541,8 @@ describe('orca skills CLI', () => {
         '--skill',
         'gamma',
         '--skill',
+        'orchestration',
+        '--skill',
         'zeta',
         '--global',
         '--agent',
@@ -569,6 +583,7 @@ describe('orca skills CLI', () => {
         'Choose one or more skills to update:',
         '  alpha',
         '  gamma',
+        '  orchestration',
         '  zeta',
         '',
         'Usage: orca skills update --skill <name> [--skill <name> ...]',
@@ -929,7 +944,7 @@ describe('orca skills CLI', () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       'npx',
-      ['--yes', 'skills', 'update', 'alpha', 'gamma', 'zeta', '--global', '-y'],
+      ['--yes', 'skills', 'update', 'alpha', 'gamma', 'orchestration', 'zeta', '--global', '-y'],
       expect.objectContaining({ stdio: 'inherit' })
     )
     expect(process.exitCode).toBe(2)

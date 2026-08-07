@@ -231,9 +231,31 @@ describe('runHostOrcaCliPassthrough', () => {
     expect(options.env.ELECTRON_RUN_AS_NODE).toBe('1')
     expect(options.env.ORCA_CLI_CWD).toBe('/home/alice/wt')
     expect(options.env.ORCA_TERMINAL_HANDLE).toBe('term_remote')
+    expect(options.env.ORCA_RUNTIME_PROFILE).toBeUndefined()
     // Why: stdin must be closed even without a payload so CLI handlers that
     // stream stdin see EOF instead of hanging forever.
     expect(child.stdin.end).toHaveBeenCalledWith()
+  })
+
+  it('propagates the managed profile to a structured remote host CLI child', async () => {
+    const child = createFakeChild()
+    const spawn = vi.fn(() => child)
+
+    const resultPromise = runHostOrcaCliPassthrough(
+      { argv: ['skills', 'update', '--all'], cwd: '/home/alice/wt', env: {} },
+      { ...BASE_OPTIONS, spawn: spawn as never, runtimeProfile: 'managed' }
+    )
+
+    await Promise.resolve()
+    child.emit('close', 0)
+    await resultPromise
+
+    const [, , options] = spawn.mock.calls[0] as unknown as [
+      string,
+      string[],
+      { env: NodeJS.ProcessEnv }
+    ]
+    expect(options.env.ORCA_RUNTIME_PROFILE).toBe('managed')
   })
 
   it('pipes a stdin payload to the CLI subprocess', async () => {

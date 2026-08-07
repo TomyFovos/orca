@@ -29,6 +29,7 @@ import type { OrcaRuntimeService } from '../../orca-runtime'
 import type { RunRow } from '../../orchestration/types'
 import { encodeFederatedControlMessage } from '../../orchestration/federation-control-message'
 import { ORCHESTRATION_FEDERATION_CONTROL_MAIL_PROTOCOL_VERSION } from '../../../../shared/protocol-version'
+import { assertManagedExecutionAuthorized } from '../../managed-execution/authorization'
 
 const TASK_STATUSES: TaskStatus[] = [
   'pending',
@@ -1073,6 +1074,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
     name: 'orchestration.taskCreate',
     params: TaskCreateParams,
     handler: (params, { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }) => {
+      assertManagedExecutionAuthorized('managed Task creation')
       const db = runtime.getOrchestrationDb()
       let deps: string[] | undefined
       if (params.deps) {
@@ -1147,6 +1149,7 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
     name: 'orchestration.taskUpdate',
     params: TaskUpdateParams,
     handler: (params, { orchestrationCompatibilityEvidence, runtime, legacyCoordinatorRunId }) => {
+      assertManagedExecutionAuthorized('managed Task modification')
       const db = runtime.getOrchestrationDb()
       const run = resolveRunScope(runtime, {
         runId: params.run,
@@ -1216,6 +1219,8 @@ export const ORCHESTRATION_METHODS: RpcMethod[] = [
         })
         return { dispatch: null, injected: false, dryRun: true, preamble }
       }
+
+      assertManagedExecutionAuthorized('managed Dispatch creation')
 
       if (!params.to) {
         throw new Error('Missing --to')
