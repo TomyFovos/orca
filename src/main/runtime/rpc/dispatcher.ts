@@ -3,7 +3,9 @@ import {
   formatZodError,
   isStreamingMethod,
   type RpcAnyMethod,
+  type RpcContext,
   type RpcEnvelopeMeta,
+  type RpcMethod,
   type RpcRegistry,
   type RpcRequest,
   type RpcResponse
@@ -14,35 +16,46 @@ import { errorResponse, successResponse } from './errors'
 import { ALL_RPC_METHODS } from './methods'
 import { emulatorProbe, emulatorProbeError } from '../../emulator/emulator-probe'
 import type { OrcaRuntimeService } from '../orca-runtime'
-import {
-  authenticatedCallerFingerprint,
-  getOrchestrationMutationExecutor,
-  type OrchestrationMutationExecutor,
-  type DurableMutationInvocation
-} from './orchestration-mutation-executor'
 import { orchestrationMigrationFence } from './orchestration-contract-fence'
 import { recordRuntimeFeatureInteraction } from './runtime-feature-interaction'
-import { OrchestrationLegacyCompatibility } from './orchestration-legacy-compatibility'
 import type { RpcDispatchStreamingOptions } from './dispatcher-stream-options'
 import { invalidArgumentResponse, mapDispatcherError } from './dispatcher-error-response'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime-profile'
+import {
+  createOrchestrationDispatchMiddleware,
+  type OrchestrationDispatchContext,
+  type OrchestrationDispatchMiddleware,
+  type OrchestrationMethodInvocation
+} from './orchestration-dispatch-middleware'
+import { selectRpcMethodsForRuntimeProfile } from './runtime-profile-method-registry'
 
-export type DispatcherOptions = { runtime: OrcaRuntimeService; methods?: readonly RpcAnyMethod[] }
+export type DispatcherOptions = {
+  runtime: OrcaRuntimeService
+  profile?: OrcaRuntimeProfile
+  methods?: readonly RpcAnyMethod[]
+}
 
 export class RpcDispatcher {
   private readonly runtime: OrcaRuntimeService
   private readonly registry: RpcRegistry
-  private readonly orchestrationMutations: OrchestrationMutationExecutor
-  private readonly legacyOrchestration: OrchestrationLegacyCompatibility
+  private readonly orchestrationDispatchMiddleware: OrchestrationDispatchMiddleware | undefined
 
-  constructor({ runtime, methods = ALL_RPC_METHODS }: DispatcherOptions) {
+  constructor({
+    runtime,
+    profile = getProcessRuntimeProfile(),
+    methods = ALL_RPC_METHODS
+  }: DispatcherOptions) {
     this.runtime = runtime
-    this.registry = buildRegistry(methods)
-    this.orchestrationMutations = getOrchestrationMutationExecutor(runtime)
-    this.legacyOrchestration = new OrchestrationLegacyCompatibility(runtime)
+    this.registry = buildRegistry(selectRpcMethodsForRuntimeProfile(profile, methods))
+    this.orchestrationDispatchMiddleware = createOrchestrationDispatchMiddleware(runtime, profile)
   }
 
   async dispatch(request: RpcRequest, options?: { signal?: AbortSignal }): Promise<RpcResponse> {
     const meta = this.meta()
+    const migrationFence = orchestrationMigrationFence(request, meta)
+    if (migrationFence) {
+      return migrationFence
+    }
     const method = this.registry.get(request.method)
     if (!method) {
       return errorResponse(
@@ -51,11 +64,6 @@ export class RpcDispatcher {
         'method_not_found',
         `Unknown method: ${request.method}`
       )
-    }
-
-    const migrationFence = orchestrationMigrationFence(request, meta)
-    if (migrationFence) {
-      return migrationFence
     }
 
     const parsedParams = this.parseParams(request, method, meta)
@@ -76,43 +84,16 @@ export class RpcDispatcher {
       emulatorProbe(`rpc ${request.method}`, request.params)
     }
     try {
-      const compatibility = await this.legacyOrchestration.tryHandle(
+      const result = await this.invokeNonStreamingMethod(
         request,
+        method,
         parsedParams.value,
-        options?.signal
-      )
-      if (compatibility.handled) {
-        return successResponse(request.id, meta, compatibility.result)
-      }
-      const effectiveParams = compatibility.params ?? parsedParams.value
-      const legacyCoordinator = this.legacyOrchestration.createCoordinatorInvocation(
-        request,
-        compatibility.legacyCoordinatorAuthority
-      )
-      const invoke = (mutation?: DurableMutationInvocation) => {
-        const legacyCoordinatorRunId = legacyCoordinator?.revalidate()
-        return method.handler(effectiveParams, {
+        {
           runtime: this.runtime,
           signal: options?.signal,
-          requestId: request.id,
-          orchestrationCapability: request.orchestrationCapability,
-          authenticatedCallerFingerprint:
-            mutation?.identity.callerFingerprint ?? authenticatedCallerFingerprint(request),
-          recordMutationReceipt: mutation?.recordReceipt,
-          orchestrationMutation: mutation?.identity,
-          legacyCoordinatorRunId,
-          legacyCoordinatorAuthority: legacyCoordinator?.authority,
-          revalidateLegacyCoordinator: legacyCoordinator?.revalidate,
-          orchestrationCompatibilityCallerAuthority:
-            compatibility.orchestrationCompatibilityCallerAuthority,
-          orchestrationCompatibilityEvidence: request.orchestrationCompatibilityEvidence
-        })
-      }
-      const result = await this.orchestrationMutations.run(
-        request,
-        effectiveParams,
-        invoke,
-        legacyCoordinator?.mutationCallerFingerprint
+          requestId: request.id
+        },
+        options?.signal
       )
       recordRuntimeFeatureInteraction(
         this.runtime,
@@ -139,6 +120,11 @@ export class RpcDispatcher {
     options?: RpcDispatchStreamingOptions
   ): Promise<void> {
     const meta = this.meta()
+    const migrationFence = orchestrationMigrationFence(request, meta)
+    if (migrationFence) {
+      reply(JSON.stringify(migrationFence))
+      return
+    }
     const method = this.registry.get(request.method)
     if (!method) {
       reply(
@@ -146,12 +132,6 @@ export class RpcDispatcher {
           errorResponse(request.id, meta, 'method_not_found', `Unknown method: ${request.method}`)
         )
       )
-      return
-    }
-
-    const migrationFence = orchestrationMigrationFence(request, meta)
-    if (migrationFence) {
-      reply(JSON.stringify(migrationFence))
       return
     }
 
@@ -163,23 +143,11 @@ export class RpcDispatcher {
 
     if (!isStreamingMethod(method)) {
       try {
-        const compatibility = await this.legacyOrchestration.tryHandle(
+        const result = await this.invokeNonStreamingMethod(
           request,
+          method,
           parsedParams.value,
-          options?.signal
-        )
-        if (compatibility.handled) {
-          reply(JSON.stringify(successResponse(request.id, meta, compatibility.result)))
-          return
-        }
-        const effectiveParams = compatibility.params ?? parsedParams.value
-        const legacyCoordinator = this.legacyOrchestration.createCoordinatorInvocation(
-          request,
-          compatibility.legacyCoordinatorAuthority
-        )
-        const invoke = (mutation?: DurableMutationInvocation) => {
-          const legacyCoordinatorRunId = legacyCoordinator?.revalidate()
-          return method.handler(effectiveParams, {
+          {
             runtime: this.runtime,
             signal: options?.signal,
             requestId: request.id,
@@ -188,27 +156,11 @@ export class RpcDispatcher {
             pairedDeviceId: options?.pairedDeviceId,
             clientKind: options?.clientKind,
             clientCapabilities: options?.clientCapabilities,
-            orchestrationCapability: request.orchestrationCapability,
-            authenticatedCallerFingerprint:
-              mutation?.identity.callerFingerprint ?? authenticatedCallerFingerprint(request),
-            recordMutationReceipt: mutation?.recordReceipt,
-            orchestrationMutation: mutation?.identity,
             pairing: options?.pairing,
             sendBinary: options?.sendBinary,
-            registerBinaryStreamHandler: options?.registerBinaryStreamHandler,
-            legacyCoordinatorRunId,
-            legacyCoordinatorAuthority: legacyCoordinator?.authority,
-            revalidateLegacyCoordinator: legacyCoordinator?.revalidate,
-            orchestrationCompatibilityCallerAuthority:
-              compatibility.orchestrationCompatibilityCallerAuthority,
-            orchestrationCompatibilityEvidence: request.orchestrationCompatibilityEvidence
-          })
-        }
-        const result = await this.orchestrationMutations.run(
-          request,
-          effectiveParams,
-          invoke,
-          legacyCoordinator?.mutationCallerFingerprint
+            registerBinaryStreamHandler: options?.registerBinaryStreamHandler
+          },
+          options?.signal
         )
         recordRuntimeFeatureInteraction(
           this.runtime,
@@ -289,5 +241,22 @@ export class RpcDispatcher {
 
   private meta(): RpcEnvelopeMeta {
     return { runtimeId: this.runtime.getRuntimeId() }
+  }
+
+  private async invokeNonStreamingMethod(
+    request: RpcRequest,
+    method: RpcMethod,
+    params: unknown,
+    context: RpcContext,
+    signal: AbortSignal | undefined
+  ): Promise<unknown> {
+    const invoke: OrchestrationMethodInvocation = (
+      effectiveParams: unknown,
+      orchestrationContext: OrchestrationDispatchContext
+    ) => method.handler(effectiveParams, { ...context, ...orchestrationContext })
+    if (!this.orchestrationDispatchMiddleware) {
+      return await invoke(params, {})
+    }
+    return await this.orchestrationDispatchMiddleware.invoke(request, params, signal, invoke)
   }
 }

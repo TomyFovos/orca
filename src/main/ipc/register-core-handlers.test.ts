@@ -378,6 +378,7 @@ vi.mock('./native-chat', () => ({
   registerNativeChatHandlers: registerNativeChatHandlersMock
 }))
 
+import { getProcessRuntimeProfile } from '../runtime/runtime-profile'
 import { registerCoreHandlers } from './register-core-handlers'
 
 describe('registerCoreHandlers', () => {
@@ -533,7 +534,7 @@ describe('registerCoreHandlers', () => {
     expect(registerEmulatorFrameStreamHandlersMock).toHaveBeenCalled()
     expect(registerEmulatorVideoStreamHandlersMock).toHaveBeenCalled()
     expect(registerFilesystemHandlersMock).toHaveBeenCalledWith(store)
-    expect(registerRuntimeHandlersMock).toHaveBeenCalledWith(runtime)
+    expect(registerRuntimeHandlersMock).toHaveBeenCalledWith(runtime, getProcessRuntimeProfile())
     expect(registerRuntimeEnvironmentHandlersMock).toHaveBeenCalledWith(store)
     expect(registerEphemeralVmHandlersMock).toHaveBeenCalledWith(store, undefined)
     expect(registerAiVaultHandlersMock).toHaveBeenCalledWith(

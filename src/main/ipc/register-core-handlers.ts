@@ -4,6 +4,7 @@ import { registerCliHandlers } from './cli'
 import { registerPreflightHandlers } from './preflight'
 import type { Store } from '../persistence'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import type { StatsCollector } from '../stats/collector'
 import { registerFilesystemHandlers } from './filesystem'
 import type { CommitMessageAgentEnvironmentResolvers } from '../text-generation/commit-message-agent-environment'
@@ -103,6 +104,7 @@ type CoreHandlerLifecycleOptions = {
   prepareAiVaultSessionResume?: (
     args: AiVaultPrepareSessionResumeArgs
   ) => Promise<AiVaultPrepareSessionResumeResult>
+  runtimeProfile?: OrcaRuntimeProfile
 }
 
 export function registerCoreHandlers(
@@ -212,7 +214,7 @@ export function registerCoreHandlers(
     registerFilesystemHandlers(store)
   }
   registerFilesystemWatcherHandlers()
-  registerRuntimeHandlers(runtime)
+  registerRuntimeHandlers(runtime, lifecycleOptions.runtimeProfile ?? getProcessRuntimeProfile())
   registerRuntimeEnvironmentHandlers(store)
   registerEphemeralVmHandlers(store, pluginService)
   registerAiVaultHandlers({

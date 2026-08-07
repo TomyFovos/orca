@@ -5,6 +5,7 @@ import { readdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import type { RuntimeMetadata, RuntimeTransportMetadata } from '../../shared/runtime-bootstrap'
 import type { OrcaRuntimeService } from './orca-runtime'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from './runtime-profile'
 import { writeRuntimeMetadata } from './runtime-metadata'
 import {
   RUNTIME_METADATA_OWNERSHIP_POLL_MS,
@@ -55,6 +56,7 @@ const DEFAULT_WS_PORT = 6768
 
 type OrcaRuntimeRpcServerOptions = {
   runtime: OrcaRuntimeService
+  runtimeProfile?: OrcaRuntimeProfile
   userDataPath: string
   pid?: number
   platform?: NodeJS.Platform
@@ -513,6 +515,7 @@ export class OrcaRuntimeRpcServer {
 
   constructor({
     runtime,
+    runtimeProfile = getProcessRuntimeProfile(),
     userDataPath,
     pid = process.pid,
     platform = process.platform,
@@ -525,7 +528,7 @@ export class OrcaRuntimeRpcServer {
     metadataOwnershipPollMs = RUNTIME_METADATA_OWNERSHIP_POLL_MS
   }: OrcaRuntimeRpcServerOptions) {
     this.runtime = runtime
-    this.dispatcher = new RpcDispatcher({ runtime })
+    this.dispatcher = new RpcDispatcher({ runtime, profile: runtimeProfile })
     this.userDataPath = userDataPath
     this.pid = pid
     this.platform = platform

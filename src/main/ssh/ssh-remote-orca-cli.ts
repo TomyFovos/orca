@@ -6,6 +6,7 @@ import { ORCHESTRATION_CONTRACT_VERSION } from '../../shared/protocol-version'
 import { RpcDispatcher } from '../runtime/rpc/dispatcher'
 import type { RpcResponse } from '../runtime/rpc/core'
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
+import { getProcessRuntimeProfile, type OrcaRuntimeProfile } from '../runtime/runtime-profile'
 import {
   HostCliUnavailableError,
   runHostOrcaCliPassthrough,
@@ -48,7 +49,8 @@ const HOST_INTERACTIVE_COMMANDS: Record<string, string> = {
 export async function runRemoteOrcaCli(
   runtime: OrcaRuntimeService,
   request: RemoteOrcaCliRequest,
-  passthroughOptions?: HostCliPassthroughOptions
+  passthroughOptions?: HostCliPassthroughOptions,
+  runtimeProfile: OrcaRuntimeProfile = getProcessRuntimeProfile()
 ): Promise<RemoteOrcaCliResult> {
   const parsed = parseRemoteCliArgs(request.argv)
   const json = parsed.flags.has('json')
@@ -74,7 +76,8 @@ export async function runRemoteOrcaCli(
       request,
       parsed,
       json,
-      new HostCliUnavailableError('output-ordered orchestration bridge required')
+      new HostCliUnavailableError('output-ordered orchestration bridge required'),
+      runtimeProfile
     )
   }
 
@@ -90,7 +93,14 @@ export async function runRemoteOrcaCli(
     // bundled CLI entry cannot be launched on this install.
     passthroughFailure = err
   }
-  return await runLegacyRemoteOrcaCli(runtime, request, parsed, json, passthroughFailure)
+  return await runLegacyRemoteOrcaCli(
+    runtime,
+    request,
+    parsed,
+    json,
+    passthroughFailure,
+    runtimeProfile
+  )
 }
 
 async function runLegacyRemoteOrcaCli(
@@ -98,9 +108,10 @@ async function runLegacyRemoteOrcaCli(
   request: RemoteOrcaCliRequest,
   parsed: ParsedRemoteCli,
   json: boolean,
-  passthroughFailure: HostCliUnavailableError
+  passthroughFailure: HostCliUnavailableError,
+  runtimeProfile: OrcaRuntimeProfile
 ): Promise<RemoteOrcaCliResult> {
-  const dispatcher = new RpcDispatcher({ runtime })
+  const dispatcher = new RpcDispatcher({ runtime, profile: runtimeProfile })
   const help = getRemoteLinearHelp(parsed)
   if (help) {
     return { stdout: `${help}\n`, stderr: '', exitCode: 0 }
