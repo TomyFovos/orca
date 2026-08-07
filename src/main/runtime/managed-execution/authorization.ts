@@ -23,9 +23,13 @@ export type ExternalControlPlaneAuthorityBinding = Readonly<{
   task_id: string
   attempt_id: string
   packet_digest: string
-  launch_plan_digest: string
+  launch_plan_digest: string | null
+  operation: string
+  payload_digest: string
   protocol_version: string
   schema_version: string
+  issued_at: string
+  expires_at: string
 }>
 
 /**
