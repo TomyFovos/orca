@@ -1,19 +1,26 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { spawn } from 'node:child_process'
+import * as fs from 'node:fs'
 import type { AddressInfo } from 'node:net'
+import * as os from 'node:os'
+import * as path from 'node:path'
 import { getAuthorityRegistry } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 
+const AI_DE_PATH = '/home/atsou/src/github.com/TomyFovos/AI-DE'
+const VALIDATOR_SCRIPT = path.join(AI_DE_PATH, 'harness/scripts/validate-receipt.js')
+
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
 })
 
-function sha256Json(value: unknown): string {
-  const bytes = Buffer.from(JSON.stringify(value), 'utf8')
+function sha256Canonical(value: unknown): string {
+  const bytes = canonicalBytes(value)
   return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
 }
 
@@ -35,7 +42,7 @@ function createSignedRequest(): ExecuteRequest {
     packet_digest: operationPayload.packet_digest,
     launch_plan_digest: null,
     operation: 'start',
-    payload_digest: sha256Json(operationPayload),
+    payload_digest: sha256Canonical(operationPayload),
     protocol_version: 'ai-de-trusted-launcher/1',
     schema_version: 'execution-envelope-1',
     issued_at: issuedAt.toISOString(),
@@ -64,6 +71,49 @@ async function closeServer(server: NonNullable<ReturnType<typeof startManagedExe
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()))
   })
+}
+
+async function validateWithAiDe(receipt: unknown, label: string): Promise<string> {
+  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orca-managed-e2e-'))
+  const receiptPath = path.join(outputDir, `${label}.json`)
+  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const validator = spawn(process.execPath, [VALIDATOR_SCRIPT, receiptPath])
+      let stdout = ''
+      let stderr = ''
+
+      validator.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8')
+      })
+      validator.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8')
+      })
+      validator.on('error', reject)
+      validator.on('close', (code) => {
+        if (code === 0) {
+          resolve(stdout.trim())
+          return
+        }
+        reject(new Error(`${label}: AI-DE validator exited ${code}: ${stderr.trim()}`))
+      })
+    })
+  } finally {
+    fs.rmSync(outputDir, { recursive: true, force: true })
+  }
+}
+
+async function postExecute(port: number, request: ExecuteRequest) {
+  const response = await fetch(`http://127.0.0.1:${port}/execute`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(request)
+  })
+  return {
+    status: response.status,
+    receipt: await response.json()
+  }
 }
 
 describe('managed execution endpoint authorization path', () => {
@@ -106,6 +156,66 @@ describe('managed execution endpoint authorization path', () => {
         backend_kind: 'orca'
       })
       expect(receipt.error).toBeUndefined()
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('validates the endpoint-generated orca receipts for all three outcomes with AI-DE', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    getAuthorityRegistry().set('managed-e2e-authority', {
+      publicKey: keyPair.publicKey,
+      revoked: false
+    })
+
+    const server = startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+
+    await new Promise<void>((resolve, reject) => {
+      server!.once('listening', resolve)
+      server!.once('error', reject)
+    })
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const acceptedRequest = createSignedRequest()
+      const accepted = await postExecute(port, acceptedRequest)
+      expect(accepted.status).toBe(200)
+      expect(accepted.receipt).toMatchObject({
+        schema: 'ai-de.execution-receipt/1',
+        outcome: 'accepted',
+        backend_kind: 'orca'
+      })
+      const acceptedValidation = await validateWithAiDe(accepted.receipt, 'accepted-orca')
+
+      const replayed = await postExecute(port, acceptedRequest)
+      expect(replayed.status).toBe(400)
+      expect(replayed.receipt).toMatchObject({
+        schema: 'ai-de.execution-receipt/1',
+        outcome: 'replayed',
+        backend_kind: 'orca'
+      })
+      const replayedValidation = await validateWithAiDe(replayed.receipt, 'replayed-orca')
+
+      const rejectedRequest = createSignedRequest()
+      rejectedRequest.envelope.signature.value = 'b'.repeat(128)
+      const rejected = await postExecute(port, rejectedRequest)
+      expect(rejected.status).toBe(400)
+      expect(rejected.receipt).toMatchObject({
+        schema: 'ai-de.execution-receipt/1',
+        outcome: 'rejected',
+        backend_kind: 'orca',
+        reject_reason: 'INVALID_SIGNATURE'
+      })
+      const rejectedValidation = await validateWithAiDe(rejected.receipt, 'rejected-orca')
+
+      console.log(
+        `[AI-DE validator] accepted=${acceptedValidation}; replayed=${replayedValidation}; rejected=${rejectedValidation}`
+      )
     } finally {
       await closeServer(server!)
     }

@@ -6,6 +6,7 @@ import {
   type ManagedExecutionAuthorization
 } from './authorization'
 import { createHash } from 'node:crypto'
+import { canonicalBytes } from './canonical'
 
 const MAX_EXPIRY_DURATION_MS = 5 * 60 * 1000 // 5分
 const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
@@ -183,7 +184,7 @@ function verifyPayloadDigest(
   envelope: SignedEnvelope,
   operation_payload: OperationPayload
 ): boolean {
-  const payloadBytes = Buffer.from(JSON.stringify(operation_payload))
+  const payloadBytes = canonicalBytes(operation_payload)
   const calculatedDigest = `sha256:${createHash('sha256').update(payloadBytes).digest('hex')}`
   return calculatedDigest === envelope.binding.payload_digest
 }

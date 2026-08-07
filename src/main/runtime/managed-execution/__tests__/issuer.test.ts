@@ -1,6 +1,7 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from '../issuer'
 import { getAuthorityRegistry } from '../authority-registry'
+import { canonicalBytes } from '../canonical'
 import * as crypto from 'node:crypto'
 
 // モック
@@ -28,7 +29,7 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
     packet_digest: `sha256:${'0'.repeat(64)}`
   }
 
-  const payloadBytes = Buffer.from(JSON.stringify(operation_payload))
+  const payloadBytes = canonicalBytes(operation_payload)
   const payloadDigest = `sha256:${crypto.createHash('sha256').update(payloadBytes).digest('hex')}`
 
   return {
