@@ -1,13 +1,11 @@
 import { verifyEd25519Signature } from './crypto'
 import { getAuthorityRegistry } from './authority-registry'
-import type {
-  ExternalControlPlaneAuthorityBinding,
-  ManagedExecutionAuthorization
+import {
+  mintManagedExecutionAuthorization,
+  type ExternalControlPlaneAuthorityBinding,
+  type ManagedExecutionAuthorization
 } from './authorization'
 import { createHash } from 'node:crypto'
-
-// authorization.ts から brand を import する代わりに、issuer 内で定義
-const BRAND = Symbol('managedExecutionAuthorizationBrand')
 
 const MAX_EXPIRY_DURATION_MS = 5 * 60 * 1000 // 5分
 const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
@@ -18,7 +16,6 @@ type MintedRequest = {
 }
 
 const mintedRequests = new Map<string, MintedRequest>()
-const issuedAuthorizations = new WeakSet<object>()
 
 export type SignedEnvelope = {
   schema: 'ai-de.execution-envelope/1'
@@ -118,8 +115,7 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   }
 
   // 8. capability を mint
-  const authorization = createAuthorization()
-  issuedAuthorizations.add(authorization)
+  const authorization = mintManagedExecutionAuthorization()
 
   // 9. request_id を記録
   mintedRequests.set(envelope.binding.request_id, {
@@ -194,12 +190,4 @@ function verifyPayloadDigest(
 
 function logReplayAttempt(request_id: string) {
   console.error(`[managed-execution] Replay attempt detected: request_id=${request_id}`)
-}
-
-function createAuthorization(): ManagedExecutionAuthorization {
-  return { [BRAND]: true } as ManagedExecutionAuthorization
-}
-
-export function isAuthorization(obj: unknown): obj is ManagedExecutionAuthorization {
-  return typeof obj === 'object' && obj !== null && BRAND in obj
 }

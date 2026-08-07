@@ -6,7 +6,7 @@ import {
   type OrcaRuntimeProfile
 } from '../runtime-profile'
 
-declare const managedExecutionAuthorizationBrand: unique symbol
+const managedExecutionAuthorizationBrand = Symbol('managedExecutionAuthorizationBrand')
 
 /**
  * @provisional
@@ -54,11 +54,20 @@ export type ManagedExecutionAuthorization = Readonly<{
   [managedExecutionAuthorizationBrand]: true
 }>
 
-// No issuer is exported or registered while the normative external contract is
-// unsettled. Keeping this set empty makes every protected managed effect reject
-// fail-closed. A future adapter must add a module-private issuer here; RPC/IPC
-// callers must never receive an issuance API.
 const issuedAuthorizations = new WeakSet<object>()
+
+/**
+ * Mint a process-local capability after the envelope issuer has completed all
+ * external-control-plane validation. The object is intentionally opaque: only
+ * this module can place it in the WeakSet checked by the authorization guard.
+ */
+export function mintManagedExecutionAuthorization(): ManagedExecutionAuthorization {
+  const authorization = {
+    [managedExecutionAuthorizationBrand]: true
+  } as ManagedExecutionAuthorization
+  issuedAuthorizations.add(authorization)
+  return authorization
+}
 
 export class ManagedExecutionAuthorizationRequiredError extends Error {
   readonly code = 'managed_execution_authorization_required'
