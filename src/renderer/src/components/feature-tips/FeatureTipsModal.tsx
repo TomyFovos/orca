@@ -29,6 +29,7 @@ import {
   trackOrcaCliFeatureTipSetupResult
 } from './feature-tip-telemetry'
 import { useMountedRef } from '@/hooks/useMountedRef'
+import { useRuntimeProfile } from '@/hooks/useRuntimeProfile'
 import { translate } from '@/i18n/i18n'
 import { VoiceDictationTipDialog } from './VoiceDictationTipDialog'
 
@@ -52,6 +53,7 @@ export default function FeatureTipsModal(): JSX.Element | null {
   const markFeatureTipsSeen = useAppStore((s) => s.markFeatureTipsSeen)
   const modalData = useAppStore((s) => s.modalData)
   const mountedRef = useMountedRef()
+  const runtimeProfile = useRuntimeProfile()
   const activeModalRef = useRef(activeModal)
   const setupRequestIdRef = useRef(0)
   const [primaryBusy, setPrimaryBusy] = useState(false)
@@ -60,6 +62,7 @@ export default function FeatureTipsModal(): JSX.Element | null {
   const currentTip = getFeatureTipForModal({
     cliInstalled: true,
     modalData,
+    runtimeProfile,
     seenTipIds,
     featureInteractions,
     settings

@@ -22,6 +22,7 @@ import {
   clearFloatingPanelReclaimIntent,
   consumeFloatingPanelReclaimIntent
 } from '@/lib/floating-workspace-focus-reclaim'
+import { _runtimeProfileAccessForTests } from '@/lib/runtime-profile-access'
 
 type EffectCallback = () => void | (() => void)
 
@@ -2747,5 +2748,39 @@ describe('FloatingTerminalPanel close behavior', () => {
     expect(mocks.closeTab).toHaveBeenCalledWith('tab-a', { reason: 'cleanup' })
     expect(mocks.closeTab).toHaveBeenCalledWith('tab-b', { reason: 'cleanup' })
     expect(mocks.closeTab).not.toHaveBeenCalledWith('tab-c')
+  })
+
+  describe('orchestration setup banner runtime gating', () => {
+    function orchestrationBannerCount(element: unknown): number {
+      return collectPropValues(element, 'className').filter(
+        (value): value is string => typeof value === 'string' && value.includes('w-[280px]')
+      ).length
+    }
+
+    beforeEach(async () => {
+      // Make the banner eligible to show so the runtime profile is the only gate:
+      // no completed setup marker and not dismissed, with an active terminal tab.
+      const setupState = await import('@/lib/orchestration-setup-state')
+      vi.mocked(setupState.hasOrchestrationSetupMarker).mockReturnValue(false)
+      vi.mocked(setupState.isOrchestrationSetupDismissed).mockReturnValue(false)
+      resetStore()
+      setFloatingTabs([makeTab()])
+    })
+
+    afterEach(() => {
+      _runtimeProfileAccessForTests.reset()
+    })
+
+    it('shows the orchestration setup banner in default execution', async () => {
+      _runtimeProfileAccessForTests.set('default')
+      const element = await renderPanel(true)
+      expect(orchestrationBannerCount(element)).toBe(1)
+    })
+
+    it('hides the orchestration setup banner in managed execution', async () => {
+      _runtimeProfileAccessForTests.set('managed')
+      const element = await renderPanel(true)
+      expect(orchestrationBannerCount(element)).toBe(0)
+    })
   })
 })

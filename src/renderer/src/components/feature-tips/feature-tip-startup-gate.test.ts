@@ -51,6 +51,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -67,6 +68,7 @@ describe('feature tip startup gate', () => {
         onboarding: firstTimeOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -83,6 +85,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: true
       })
@@ -99,6 +102,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -115,6 +119,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(true),
         suppressedByOnboardingThisSession: false
       })
@@ -131,6 +136,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -147,6 +153,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -163,6 +170,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(false),
         suppressedByOnboardingThisSession: false
       })
@@ -179,6 +187,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -195,6 +204,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -211,6 +221,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -229,6 +240,7 @@ describe('feature tip startup gate', () => {
         onboarding: existingUserOnboarding,
         persistedUIReady: true,
         promptedThisSession: false,
+        runtimeProfile: 'default',
         settings: makeSettings(),
         suppressedByOnboardingThisSession: false
       })
@@ -250,5 +262,39 @@ describe('feature tip startup gate', () => {
         })
       )
     ).toBe(true)
+  })
+
+  it('skips the orchestration CLI tip entirely in the managed runtime profile', () => {
+    expect(
+      getFeatureTipsAppOpenDecision({
+        activeModal: 'none',
+        cliInstalled: false,
+        featureTipsSeenIds: [],
+        featureInteractions: {},
+        onboarding: existingUserOnboarding,
+        persistedUIReady: true,
+        promptedThisSession: false,
+        runtimeProfile: 'managed',
+        settings: makeSettings(),
+        suppressedByOnboardingThisSession: false
+      })
+    ).toEqual({ kind: 'open', tipId: 'cmd-j-palette' })
+  })
+
+  it('does not open any tip in managed once the remaining tips are seen', () => {
+    expect(
+      getFeatureTipsAppOpenDecision({
+        activeModal: 'none',
+        cliInstalled: false,
+        featureTipsSeenIds: ['cmd-j-palette', 'voice-dictation'],
+        featureInteractions: {},
+        onboarding: existingUserOnboarding,
+        persistedUIReady: true,
+        promptedThisSession: false,
+        runtimeProfile: 'managed',
+        settings: makeSettings(),
+        suppressedByOnboardingThisSession: false
+      })
+    ).toEqual({ kind: 'skip' })
   })
 })

@@ -4,6 +4,7 @@ import {
   type FeatureWallMediaTile,
   type FeatureWallMediaTileId
 } from './feature-wall-tiles'
+import { MANAGED_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from './runtime-profile'
 
 export type FeatureWallWorkflowId =
   | 'tasks'
@@ -83,3 +84,31 @@ export function getFeatureWallMediaTile(id: FeatureWallMediaTileId): FeatureWall
 }
 
 export const DEFAULT_FEATURE_WALL_WORKFLOW_ID: FeatureWallWorkflowId = 'workspaces'
+
+/**
+ * Workflows owned by the external control plane in managed execution. The
+ * agents/orchestration tour surface is never user-reachable there, so it is
+ * removed from the rail entirely (rather than shown as a dead end).
+ */
+const MANAGED_HIDDEN_FEATURE_WALL_WORKFLOW_IDS: readonly FeatureWallWorkflowId[] = [
+  'agents-orchestration'
+]
+
+/**
+ * Filters the feature-wall workflow list for the active runtime profile. In
+ * managed execution the orchestration workflow is dropped so no link or rail
+ * entry points at a surface the renderer hides. Default execution keeps the
+ * full list. Pure and side-effect free so it can be memoized at the single
+ * supply source (FeatureWallTourSurface) and threaded down.
+ */
+export function filterFeatureWallWorkflowsForRuntimeProfile(
+  runtimeProfile: OrcaRuntimeProfile,
+  workflows: readonly FeatureWallWorkflow[]
+): readonly FeatureWallWorkflow[] {
+  if (runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE) {
+    return workflows
+  }
+  return workflows.filter(
+    (workflow) => !MANAGED_HIDDEN_FEATURE_WALL_WORKFLOW_IDS.includes(workflow.id)
+  )
+}

@@ -9,6 +9,7 @@ import type {
 import type { RuntimeRpcResponse } from '../../../shared/runtime-rpc-envelope'
 import { parseHostAccessLink } from '../../../shared/remote-pairing-address'
 import { verifyRemotePairingRuntimeStatus } from '../../../shared/remote-pairing-verification'
+import { DEFAULT_ORCA_RUNTIME_PROFILE } from '../../../shared/runtime-profile'
 import type { AiVaultListArgs, AiVaultListResult } from '../../../shared/ai-vault-types'
 import type {
   AiVaultPrepareSessionResumeArgs,
@@ -545,6 +546,9 @@ function createWebPreloadApi(): Partial<PreloadApi> {
           dockBadgeLabel: null
         }),
       getFeatureWallAssetBaseUrl: () => Promise.resolve('/'),
+      // Why: the browser fallback has no managed runtime host, so the startup
+      // profile is always the legacy-compatible default.
+      getRuntimeProfileSync: () => DEFAULT_ORCA_RUNTIME_PROFILE,
       relaunch: () => Promise.resolve(window.location.reload()),
       restart: () => Promise.resolve(window.location.reload()),
       reload: () => Promise.resolve(window.location.reload()),

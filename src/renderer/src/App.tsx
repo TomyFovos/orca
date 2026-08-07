@@ -46,6 +46,7 @@ import { WORKTREE_REFRESH_CONCURRENCY } from './store/slices/worktrees'
 import { useShallow } from 'zustand/react/shallow'
 import { isRemoteWorkspaceSnapshotApplyInProgress, useIpcEvents } from './hooks/useIpcEvents'
 import { useAutomationDispatchEvents } from './hooks/useAutomationDispatchEvents'
+import { useRuntimeProfile } from './hooks/useRuntimeProfile'
 import RetainedAgentsSyncGate from './components/dashboard/RetainedAgentsSyncGate'
 import { AgentHibernationGate } from './components/AgentHibernationGate'
 import { ActivityTitlebarControls } from './components/activity/ActivityTitlebarControls'
@@ -434,6 +435,7 @@ function shouldMountUpdateCardForStatus(status: UpdateStatus): boolean {
 
 function App(): React.JSX.Element {
   const clearUnreadDockBadge = useUnreadDockBadge()
+  const runtimeProfile = useRuntimeProfile()
   useRadixBodyPointerEventsRecovery()
   useWebSessionTabsSync()
   const [floatingTerminalOpen, setFloatingTerminalOpen] = useState(false)
@@ -807,6 +809,7 @@ function App(): React.JSX.Element {
       onboarding,
       persistedUIReady,
       promptedThisSession: featureTipsPromptedThisSessionRef.current,
+      runtimeProfile,
       settings,
       suppressedByOnboardingThisSession: featureTipsSuppressedByOnboardingThisSessionRef.current
     })
@@ -838,6 +841,7 @@ function App(): React.JSX.Element {
     featureTipsSeenIds,
     onboarding,
     persistedUIReady,
+    runtimeProfile,
     settings
   ])
 

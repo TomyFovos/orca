@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react'
 import { Check, Globe2, MonitorCog, TicketCheck, Workflow } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { useRuntimeProfile } from '@/hooks/useRuntimeProfile'
+import { isManagedRuntimeProfile } from '@/lib/runtime-profile-access'
 import type {
   OnboardingFeatureSetupId,
   OnboardingFeatureSetupSelection
@@ -100,10 +102,18 @@ export function FeatureSetupChecklist({
   value,
   onChange
 }: FeatureSetupChecklistProps): React.JSX.Element {
+  // Why: the orchestration feature is owned by the external control plane in
+  // managed execution and is never user-setup-able, so its onboarding card is
+  // removed here (fail-closed via the sync profile read) instead of offering a
+  // setup path that cannot complete.
+  const runtimeProfile = useRuntimeProfile()
+  const rows = isManagedRuntimeProfile(runtimeProfile)
+    ? FEATURE_SETUP_ROWS.filter((row) => row.id !== 'orchestration')
+    : FEATURE_SETUP_ROWS
   return (
     <section className="mt-6">
       <div className="grid gap-3 md:grid-cols-4">
-        {FEATURE_SETUP_ROWS.map((row) => {
+        {rows.map((row) => {
           const selected = value[row.id]
           return (
             <button

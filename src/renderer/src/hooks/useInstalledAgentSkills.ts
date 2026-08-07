@@ -9,6 +9,10 @@ import type {
 import { ORCHESTRATION_SKILL_NAME } from '@/lib/agent-feature-install-commands'
 import { markOrchestrationSetupComplete } from '@/lib/orchestration-setup-state'
 import {
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  type OrcaRuntimeProfile
+} from '../../../shared/runtime-profile'
+import {
   discoverInstalledAgentSkills,
   getCachedSkillDiscovery,
   getRuntimeScopedSkillDiscoveryKey,
@@ -21,6 +25,7 @@ import {
 } from './installed-agent-skills-change-event'
 import { useActiveSkillDiscoveryRuntimeTarget } from './use-active-skill-discovery-runtime-target'
 import { useMountedRef } from './useMountedRef'
+import { useRuntimeProfile } from './useRuntimeProfile'
 
 /** Placeholder key while the owning runtime is unknown; nothing is cached under it. */
 const UNRESOLVED_RUNTIME_DISCOVERY_KEY = 'runtime:unresolved'
@@ -59,6 +64,36 @@ function normalizeSkillName(value: string): string {
 
 function isOrchestrationSkillName(skillName: string): boolean {
   return normalizeSkillName(skillName) === ORCHESTRATION_SKILL_NAME
+}
+
+/**
+ * Normalizes the derived orchestration-skill state for the active runtime
+ * profile. In managed execution the orchestration bundle is owned by the
+ * external control plane and is never user-installable, so every progress
+ * surface treats it as N/A (satisfied). Applying the rule here — at the single
+ * supply source every consumer reads — means no downstream progress calculation
+ * can forget it and leave a "progress that never fills" UI. The raw discovery
+ * result stays on skills/sources/refresh for honesty; only the derived flags
+ * that drive progress are normalized.
+ */
+export function resolveOrchestrationSkillStateForRuntime(
+  runtimeProfile: OrcaRuntimeProfile,
+  skillNames: readonly string[],
+  state: InstalledAgentSkillState
+): InstalledAgentSkillState {
+  if (runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE) {
+    return state
+  }
+  if (!skillNames.some(isOrchestrationSkillName)) {
+    return state
+  }
+  return {
+    ...state,
+    installed: true,
+    loading: false,
+    settled: true,
+    error: null
+  }
 }
 
 function basenameFromPath(pathValue: string): string {
@@ -290,7 +325,8 @@ export function useInstalledAgentSkillNames(
 
   const forceRefresh = useCallback(() => refresh(true), [refresh])
 
-  return {
+  const runtimeProfile = useRuntimeProfile()
+  const baseState: InstalledAgentSkillState = {
     installed,
     loading: loadingForRender,
     settled: enabled && resultForRender !== null,
@@ -299,4 +335,5 @@ export function useInstalledAgentSkillNames(
     sources,
     refresh: forceRefresh
   }
+  return resolveOrchestrationSkillStateForRuntime(runtimeProfile, candidateSkillNames, baseState)
 }

@@ -17,6 +17,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: false,
       modalData: { tipId: 'voice-dictation' },
+      runtimeProfile: 'default',
       seenTipIds: ['voice-dictation'],
       featureInteractions: {},
       settings: makeSettings()
@@ -29,6 +30,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: false,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: [],
       featureInteractions: {},
       settings: makeSettings()
@@ -41,6 +43,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: false,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: ['voice-dictation'],
       featureInteractions: {},
       settings: makeSettings()
@@ -53,6 +56,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: true,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: ['orca-cli'],
       featureInteractions: {},
       settings: makeSettings()
@@ -65,6 +69,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: false,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: ['voice-dictation', 'orca-cli', 'cmd-j-palette'],
       featureInteractions: {},
       settings: makeSettings()
@@ -77,6 +82,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: true,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: ['voice-dictation', 'cmd-j-palette'],
       featureInteractions: {},
       settings: makeSettings()
@@ -89,6 +95,7 @@ describe('feature tip modal state', () => {
     const tip = getFeatureTipForModal({
       cliInstalled: true,
       modalData: {},
+      runtimeProfile: 'default',
       seenTipIds: ['cmd-j-palette'],
       featureInteractions: {
         'voice-dictation': { firstInteractedAt: 100, interactionCount: 1 }
@@ -97,5 +104,31 @@ describe('feature tip modal state', () => {
     })
 
     expect(tip).toBeNull()
+  })
+
+  it('refuses a pinned orchestration CLI tip in the managed runtime profile', () => {
+    const tip = getFeatureTipForModal({
+      cliInstalled: false,
+      modalData: { tipId: 'orca-cli' },
+      runtimeProfile: 'managed',
+      seenTipIds: [],
+      featureInteractions: {},
+      settings: makeSettings()
+    })
+
+    expect(tip).toBeNull()
+  })
+
+  it('falls back to the command palette tip when the CLI tip is hidden in managed', () => {
+    const tip = getFeatureTipForModal({
+      cliInstalled: false,
+      modalData: {},
+      runtimeProfile: 'managed',
+      seenTipIds: [],
+      featureInteractions: {},
+      settings: makeSettings()
+    })
+
+    expect(tip?.id).toBe('cmd-j-palette')
   })
 })

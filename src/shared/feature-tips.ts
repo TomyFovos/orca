@@ -3,6 +3,7 @@ import {
   type FeatureInteractionId,
   type FeatureInteractionState
 } from './feature-interactions'
+import { MANAGED_ORCA_RUNTIME_PROFILE, type OrcaRuntimeProfile } from './runtime-profile'
 
 export type FeatureTipId = 'voice-dictation' | 'orca-cli' | 'cmd-j-palette'
 
@@ -65,6 +66,40 @@ export const FEATURE_TIPS = [
 ] as const satisfies readonly FeatureTip[]
 
 export const FEATURE_TIP_IDS = FEATURE_TIPS.map((tip) => tip.id)
+
+/**
+ * Tips that drive orchestration setup. The `orca-cli` tip installs the Orca CLI
+ * and enables the orchestration skill, whose visual and setup terminal are all
+ * orchestration surfaces. In managed execution that bundle is owned by the
+ * external control plane, so the tip is removed rather than offering a setup
+ * path that cannot complete.
+ */
+const MANAGED_HIDDEN_FEATURE_TIP_IDS: readonly FeatureTipId[] = ['orca-cli']
+
+export function isFeatureTipHiddenForRuntimeProfile(
+  runtimeProfile: OrcaRuntimeProfile,
+  tipId: FeatureTipId
+): boolean {
+  return (
+    runtimeProfile === MANAGED_ORCA_RUNTIME_PROFILE &&
+    MANAGED_HIDDEN_FEATURE_TIP_IDS.includes(tipId)
+  )
+}
+
+/**
+ * Filters the tip catalog for the active runtime profile (see
+ * `isFeatureTipHiddenForRuntimeProfile`). Pure so it can be applied at the
+ * renderer chokepoints that decide which tip shows.
+ */
+export function filterFeatureTipsForRuntimeProfile(
+  runtimeProfile: OrcaRuntimeProfile,
+  tips: readonly FeatureTip[]
+): FeatureTip[] {
+  if (runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE) {
+    return [...tips]
+  }
+  return tips.filter((tip) => !MANAGED_HIDDEN_FEATURE_TIP_IDS.includes(tip.id))
+}
 
 export function isFeatureTipId(value: unknown): value is FeatureTipId {
   return typeof value === 'string' && FEATURE_TIP_IDS.includes(value as FeatureTipId)

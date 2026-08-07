@@ -39,6 +39,10 @@ All changes must consider the SSH use case. Don't assume local-only execution.
 
 All changes must consider folder workspaces as well as git worktrees. Don't assume every workspace is a git worktree.
 
+## Runtime Profile (managed vs default)
+
+Orca runs under a startup-fixed runtime profile from `ORCA_RUNTIME_PROFILE`: `default` (standalone, orchestration user-facing) or `managed` (external control plane owns orchestration). In `managed` the renderer hides orchestration setup/promotion surfaces but keeps running-agent observability. The renderer reads the profile synchronously and fails closed to `managed` when undetermined; UI hiding is consistency, not a security boundary (enforcement is in the main process). Follow [`docs/reference/runtime-profile-matrix.md`](./docs/reference/runtime-profile-matrix.md).
+
 ## Git Binary Compatibility
 
 Orca runs the user's Git binary on native, WSL, and SSH hosts, which may all have different versions. Treat Git 2.25 as the core-workflow baseline and follow [`docs/reference/git-compatibility.md`](./docs/reference/git-compatibility.md).

@@ -1,9 +1,6 @@
 import { useCallback } from 'react'
 import type { KeyboardEvent, RefObject } from 'react'
-import {
-  FEATURE_WALL_WORKFLOWS,
-  type FeatureWallWorkflow
-} from '../../../../shared/feature-wall-workflows'
+import type { FeatureWallWorkflow } from '../../../../shared/feature-wall-workflows'
 import {
   getFeatureWallRailNavigationTarget,
   type FeatureWallRailNavigationKey
@@ -13,10 +10,12 @@ const FEATURE_WALL_TOUR_NAVIGATION_KEYS = new Set<string>(['ArrowUp', 'ArrowDown
 
 export function useFeatureWallTourRailKeydown({
   railRefs,
-  onSelectWorkflow
+  onSelectWorkflow,
+  workflows
 }: {
   railRefs: RefObject<(HTMLButtonElement | null)[]>
   onSelectWorkflow: (workflow: FeatureWallWorkflow) => void
+  workflows: readonly FeatureWallWorkflow[]
 }): (event: KeyboardEvent<HTMLButtonElement>, index: number) => void {
   return useCallback(
     (event: KeyboardEvent<HTMLButtonElement>, index: number): void => {
@@ -27,15 +26,15 @@ export function useFeatureWallTourRailKeydown({
       const nextIndex = getFeatureWallRailNavigationTarget({
         currentIndex: index,
         key: event.key as FeatureWallRailNavigationKey,
-        itemCount: FEATURE_WALL_WORKFLOWS.length
+        itemCount: workflows.length
       })
-      const nextWorkflow = FEATURE_WALL_WORKFLOWS[nextIndex]
+      const nextWorkflow = workflows[nextIndex]
       if (!nextWorkflow) {
         return
       }
       onSelectWorkflow(nextWorkflow)
       railRefs.current[nextIndex]?.focus()
     },
-    [onSelectWorkflow, railRefs]
+    [onSelectWorkflow, railRefs, workflows]
   )
 }

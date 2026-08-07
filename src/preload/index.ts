@@ -4,6 +4,7 @@ import { electronAPI } from '@electron-toolkit/preload'
 import { preloadE2EConfig } from './e2e-config'
 import { glApi } from './gitlab'
 import type { AppIdentity } from '../shared/app-identity'
+import type { OrcaRuntimeProfile } from '../shared/runtime-profile'
 import type { DashboardSnapshot, DashboardRevealAgentArgs } from '../shared/dashboard-snapshot'
 import type {
   TerminalPreviewConnectResult,
@@ -470,6 +471,12 @@ const api = {
     getIdentity: (): Promise<AppIdentity> => ipcRenderer.invoke('app:getIdentity'),
     getFeatureWallAssetBaseUrl: (): Promise<string> =>
       ipcRenderer.invoke('app:getFeatureWallAssetBaseUrl'),
+    // Why: the startup runtime profile is fixed before any window is created, so a
+    // blocking read is safe (same pattern as settings:get-sync) and avoids an
+    // undetermined-profile render gap that would briefly expose orchestration UI
+    // in managed mode.
+    getRuntimeProfileSync: (): OrcaRuntimeProfile =>
+      ipcRenderer.sendSync('app:getRuntimeProfileSync') as OrcaRuntimeProfile,
     relaunch: (): Promise<void> => ipcRenderer.invoke('app:relaunch'),
     restart: async (): Promise<void> => {
       await prepareRendererForAppRestart(window, {
