@@ -8,6 +8,7 @@ import {
   ManagedExecutionAuthorizationRequiredError,
   assertManagedExecutionAuthorized,
   filterManagedExecutionSkillDelivery,
+  mintManagedExecutionAuthorization,
   propagateManagedRuntimeProfile
 } from './authorization'
 
@@ -22,6 +23,13 @@ describe('managed execution authorization boundary', () => {
     expect(() => assertManagedExecutionAuthorized('worker startup', {})).toThrow(
       ManagedExecutionAuthorizationRequiredError
     )
+  })
+
+  it('accepts a capability minted by the module-private issuer path', () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const authorization = mintManagedExecutionAuthorization()
+
+    expect(() => assertManagedExecutionAuthorized('worker startup', authorization)).not.toThrow()
   })
 
   it('keeps the default profile authorization-free', () => {

@@ -1,0 +1,83 @@
+{
+  "description": "RFC8785-JCS shared test vectors for canonical JSON implementation verification",
+  "version": "1.0",
+  "vectors": [
+    {
+      "index": 1,
+      "name": "ASCII-only binding",
+      "description": "Baseline test with ASCII keys and integer values only",
+      "input": {
+        "authority_id": "test-authority",
+        "operation": "start",
+        "request_id": "550e8400-e29b-41d4-a716-446655440000",
+        "case_id": "case-001",
+        "task_id": "task-001",
+        "attempt_id": "attempt-001",
+        "packet_digest": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+        "launch_plan_digest": null,
+        "payload_digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+        "protocol_version": "ai-de-trusted-launcher/1",
+        "schema_version": "execution-envelope-1"
+      },
+      "expected_canonical": "{\"attempt_id\":\"attempt-001\",\"authority_id\":\"test-authority\",\"case_id\":\"case-001\",\"launch_plan_digest\":null,\"operation\":\"start\",\"packet_digest\":\"sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\",\"payload_digest\":\"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\",\"protocol_version\":\"ai-de-trusted-launcher/1\",\"request_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"schema_version\":\"execution-envelope-1\",\"task_id\":\"task-001\"}",
+      "expected_sha256": "93ac89c8e35f40e79cc741709ebdc5be12e855631fbd20f4f6edb9d6460971ab"
+    },
+    {
+      "index": 2,
+      "name": "Non-ASCII keys (Japanese)",
+      "description": "UTF-8 3-byte characters in keys (UTF-16 code unit order vs UTF-8 byte order)",
+      "input": {
+        "case_id": "case-001",
+        "テスト": "value1",
+        "authority_id": "test"
+      },
+      "expected_canonical": "{\"authority_id\":\"test\",\"case_id\":\"case-001\",\"テスト\":\"value1\"}",
+      "expected_sha256": "66fbb3db88d8b5b7ff4e4864d0e5e6cdf0e03cb35ce612f2183302d66bf0ee4e"
+    },
+    {
+      "index": 3,
+      "name": "Negative zero (-0)",
+      "description": "Negative zero must be normalized to '0' per RFC8785",
+      "input": {
+        "value": -0,
+        "other": 42
+      },
+      "expected_canonical": "{\"other\":42,\"value\":0}",
+      "expected_sha256": "de140e60d6cadf61a4c4d5dc06e88c6fa5785e6256e7623be567aa48c9bda55c",
+      "note": "JSON.stringify(-0) produces '0', but Object.is(-0, -0) is true. Implementation must detect and normalize."
+    },
+    {
+      "index": 4,
+      "name": "Nested objects and arrays",
+      "description": "Recursive canonicalization with key sorting at each level",
+      "input": {
+        "z": {
+          "b": 2,
+          "a": 1
+        },
+        "a": [3, 2, 1],
+        "m": {
+          "nested": {
+            "deep": {
+              "value": "test"
+            }
+          }
+        }
+      },
+      "expected_canonical": "{\"a\":[3,2,1],\"m\":{\"nested\":{\"deep\":{\"value\":\"test\"}}},\"z\":{\"a\":1,\"b\":2}}",
+      "expected_sha256": "f3503fd731a276b6b44ab8808e475d6ec6dfe797aa4a0ebe1e839c1dab543680"
+    },
+    {
+      "index": 5,
+      "name": "Escape characters",
+      "description": "Strings requiring escape sequences (newline, tab, quotes, control characters)",
+      "input": {
+        "message": "Hello\nWorld\t\"quoted\"",
+        "path": "C:\\Users\\test",
+        "unicode": "\u0000\u001f"
+      },
+      "expected_canonical": "{\"message\":\"Hello\\nWorld\\t\\\"quoted\\\"\",\"path\":\"C:\\\\Users\\\\test\",\"unicode\":\"\\u0000\\u001f\"}",
+      "expected_sha256": "c4be78859f3ae8f28729d214585499be7f27d578718201b7eff5623ba9a3e5b1"
+    }
+  ]
+}
