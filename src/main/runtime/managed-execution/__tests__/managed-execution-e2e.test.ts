@@ -1,18 +1,15 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import type { AddressInfo } from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
+import { validateReceiptWithAiDe } from './ai-de-receipt-validator'
 import { getAuthorityRegistry } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
-
-const AI_DE_PATH = '/home/atsou/src/github.com/TomyFovos/AI-DE'
-const VALIDATOR_SCRIPT = path.join(AI_DE_PATH, 'harness/scripts/validate-receipt.js')
 
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
@@ -77,26 +74,11 @@ async function validateWithAiDe(receipt: unknown, label: string): Promise<string
   fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
 
   try {
-    return await new Promise((resolve, reject) => {
-      const validator = spawn(process.execPath, [VALIDATOR_SCRIPT, receiptPath])
-      let stdout = ''
-      let stderr = ''
-
-      validator.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8')
-      })
-      validator.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString('utf8')
-      })
-      validator.on('error', reject)
-      validator.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout.trim())
-          return
-        }
-        reject(new Error(`${label}: AI-DE validator exited ${code}: ${stderr.trim()}`))
-      })
-    })
+    const result = validateReceiptWithAiDe(receiptPath)
+    if (!result.valid) {
+      throw new Error(`${label}: AI-DE validator rejected receipt: ${result.output}`)
+    }
+    return result.output
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true })
   }

@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-
-const AI_DE_PATH = '/home/atsou/src/github.com/TomyFovos/AI-DE'
-const VALIDATOR_SCRIPT = path.join(AI_DE_PATH, 'harness/scripts/validate-receipt.js')
+import { validateReceiptWithAiDe } from './ai-de-receipt-validator'
 const OUTPUT_DIR = path.join(__dirname, 'test-receipts')
 
 if (!fs.existsSync(OUTPUT_DIR)) {
@@ -12,28 +9,6 @@ if (!fs.existsSync(OUTPUT_DIR)) {
 }
 
 describe('Orca receipt validation with AI-DE validator', () => {
-  async function validateReceipt(receiptPath: string): Promise<{ valid: boolean; output: string }> {
-    return new Promise((resolve) => {
-      const proc = spawn('node', [VALIDATOR_SCRIPT, receiptPath])
-      let stdout = ''
-      let stderr = ''
-
-      proc.stdout.on('data', (data) => {
-        stdout += data
-      })
-      proc.stderr.on('data', (data) => {
-        stderr += data
-      })
-
-      proc.on('close', (code) => {
-        resolve({
-          valid: code === 0,
-          output: code === 0 ? stdout.trim() : stderr.trim()
-        })
-      })
-    })
-  }
-
   it('accepted receipt (outcome=accepted, backend_kind=orca) is valid', async () => {
     const receipt = {
       schema: 'ai-de.execution-receipt/1',
@@ -54,7 +29,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
     const receiptPath = path.join(OUTPUT_DIR, 'accepted-orca.json')
     fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
 
-    const result = await validateReceipt(receiptPath)
+    const result = validateReceiptWithAiDe(receiptPath)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
@@ -79,7 +54,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
     const receiptPath = path.join(OUTPUT_DIR, 'replayed-orca.json')
     fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
 
-    const result = await validateReceipt(receiptPath)
+    const result = validateReceiptWithAiDe(receiptPath)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
@@ -105,7 +80,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
     const receiptPath = path.join(OUTPUT_DIR, 'rejected-orca.json')
     fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
 
-    const result = await validateReceipt(receiptPath)
+    const result = validateReceiptWithAiDe(receiptPath)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
