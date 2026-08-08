@@ -21,7 +21,6 @@ const AI_DE_RECEIPT_SCHEMA = path.join(
   AI_DE_PATH,
   'knowledge/schemas/execution-receipt-1.schema.json'
 )
-
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
