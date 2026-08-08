@@ -1,12 +1,12 @@
 import { describe, test, expect, beforeEach, vi } from 'vitest'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from '../issuer'
-import { getAuthorityRegistry } from '../authority-registry'
+import { lookupAuthority } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import * as crypto from 'node:crypto'
 
 // モック
 vi.mock('../authority-registry', () => ({
-  getAuthorityRegistry: vi.fn()
+  lookupAuthority: vi.fn()
 }))
 
 vi.mock('../crypto', () => ({
@@ -15,7 +15,7 @@ vi.mock('../crypto', () => ({
 
 import { verifyEd25519Signature } from '../crypto'
 
-const mockRegistry = vi.mocked(getAuthorityRegistry)
+const mockLookupAuthority = vi.mocked(lookupAuthority)
 const mockVerifySignature = vi.mocked(verifyEd25519Signature)
 
 function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest {
@@ -65,8 +65,10 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
 describe('issuer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockRegistry.mockReturnValue(
-      new Map([['test-authority', { publicKey: 'test-public-key', revoked: false }]])
+    mockLookupAuthority.mockImplementation((authorityId) =>
+      authorityId === 'test-authority'
+        ? { publicKey: 'test-public-key', revoked: false }
+        : undefined
     )
     mockVerifySignature.mockReturnValue(true)
   })
