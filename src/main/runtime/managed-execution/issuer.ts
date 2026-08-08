@@ -1,5 +1,5 @@
 import { verifyEd25519Signature } from './crypto'
-import { getAuthorityRegistry } from './authority-registry'
+import { lookupAuthority } from './authority-registry'
 import {
   mintManagedExecutionAuthorization,
   type ExternalControlPlaneAuthorityBinding,
@@ -75,8 +75,7 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   const { envelope, operation_payload } = request
 
   // 1. authority_id を registry と照合（署名検証より先）
-  const registry = getAuthorityRegistry()
-  const authorityInfo = registry.get(envelope.binding.authority_id)
+  const authorityInfo = lookupAuthority(envelope.binding.authority_id)
   if (!authorityInfo) {
     throw new IssuerError(IssuerErrorCode.UNKNOWN_AUTHORITY_ID, 'Unknown authority_id')
   }
