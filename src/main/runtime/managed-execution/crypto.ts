@@ -16,8 +16,12 @@ export function verifyEd25519Signature(envelope: SignedEnvelope, publicKeyPem: s
       return false
     }
 
-    // binding を RFC8785-JCS で正規化（AI-DE と同一実装）
-    const bindingBytes = canonicalBytes(envelope.binding)
+    // binding と有効期間を RFC8785-JCS で正規化（AI-DE と同一実装）
+    const preimageBytes = canonicalBytes({
+      binding: envelope.binding,
+      issued_at: envelope.issued_at,
+      expires_at: envelope.expires_at
+    })
 
     // 署名を hex からデコード
     const signatureBuffer = Buffer.from(envelope.signature.value, 'hex')
@@ -31,7 +35,7 @@ export function verifyEd25519Signature(envelope: SignedEnvelope, publicKeyPem: s
     const publicKey = createPublicKey(publicKeyPem)
 
     // Ed25519 署名を検証
-    const isValid = verify(null, bindingBytes, publicKey, signatureBuffer)
+    const isValid = verify(null, preimageBytes, publicKey, signatureBuffer)
 
     return isValid
   } catch {
