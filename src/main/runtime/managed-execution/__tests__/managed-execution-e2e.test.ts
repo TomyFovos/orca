@@ -290,9 +290,9 @@ describe('managed execution endpoint authorization path', () => {
     let protectedEffectCalls = 0
     const server = await startManagedExecutionEndpoint({
       port: 0,
-      onProtectedEffect: (envelope) => {
+      onProtectedEffect: (payload) => {
         protectedEffectCalls += 1
-        expect(envelope.payload).toMatchObject({ case_id: 'managed-e2e-case' })
+        expect(payload).toMatchObject({ case_id: 'managed-e2e-case' })
       }
     })
     expect(server).not.toBeNull()

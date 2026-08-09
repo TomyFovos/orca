@@ -392,6 +392,12 @@ const managedAuthorityRegistryLoaded =
   runtimeProfile === MANAGED_ORCA_RUNTIME_PROFILE ? isAuthorityRegistryLoaded() : false
 let managedExecutionEndpoint: Server | null = null
 
+function handleManagedExecutionProtectedEffect(payload: Record<string, unknown>): void {
+  console.log(
+    `[managed-execution] Protected effect executed: payload_fields=${Object.keys(payload).length}`
+  )
+}
+
 async function startManagedExecutionEndpointIfConfigured(): Promise<void> {
   if (
     runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE ||
@@ -403,7 +409,9 @@ async function startManagedExecutionEndpointIfConfigured(): Promise<void> {
   }
 
   try {
-    managedExecutionEndpoint = await startManagedExecutionEndpoint()
+    managedExecutionEndpoint = await startManagedExecutionEndpoint({
+      onProtectedEffect: handleManagedExecutionProtectedEffect
+    })
   } catch (error) {
     console.error('[managed-execution] Failed to start endpoint:', error)
     app.exit(1)

@@ -10,7 +10,7 @@ const DEFAULT_HOST = '127.0.0.1'
 export type EndpointConfig = {
   host?: string
   port?: number
-  onProtectedEffect?: (envelope: ExecuteRequest) => void
+  onProtectedEffect?: (payload: ExecuteRequest['payload']) => void
 }
 
 type ExecutionReceipt = {
@@ -87,7 +87,7 @@ export async function startManagedExecutionEndpoint(
       // 保護された効果を実行（この例では何もしない）
       // 実際には operation に応じた処理を行う
       assertManagedExecutionAuthorized(envelope.binding.operation, authorization)
-      onProtectedEffect?.(envelope)
+      onProtectedEffect?.(envelope.payload)
 
       // 成功応答（execution-receipt/1 準拠、outcome=accepted）
       const receipt: StoredAcceptedReceipt['receipt'] = {
