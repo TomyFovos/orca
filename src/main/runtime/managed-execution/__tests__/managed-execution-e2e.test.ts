@@ -58,7 +58,15 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
     protocol_version: 'ai-de-trusted-launcher/1',
     schema_version: 'execution-envelope-1'
   }
-  const signature = sign(null, canonicalBytes(binding), keyPair.privateKey)
+  const signature = sign(
+    null,
+    canonicalBytes({
+      binding,
+      issued_at: issuedAt.toISOString(),
+      expires_at: expiresAt.toISOString()
+    }),
+    keyPair.privateKey
+  )
 
   return {
     envelope: {
