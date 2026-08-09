@@ -1,20 +1,35 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, afterEach, describe, expect, it } from 'vitest'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
+import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
-import { validateReceiptWithAiDe } from './ai-de-receipt-validator'
-import { getAuthorityRegistry } from '../authority-registry'
+import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 
+const AI_DE_PATH = '/home/atsou/src/github.com/TomyFovos/AI-DE'
+const AI_DE_SCHEMA_VALIDATOR = path.join(
+  AI_DE_PATH,
+  'harness/runtime/execution-packet/schema-validator.js'
+)
+const AI_DE_RECEIPT_SCHEMA = path.join(
+  AI_DE_PATH,
+  'knowledge/schemas/execution-receipt-1.schema.json'
+)
+
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
 })
+
+const authorityRegistryDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orca-authority-registry-'))
+const authorityRegistryPath = path.join(authorityRegistryDir, 'authorities.json')
+const previousAuthorityRegistryPath = process.env.ORCA_MANAGED_AUTHORITY_REGISTRY_PATH
 
 function sha256Canonical(value: unknown): string {
   const bytes = canonicalBytes(value)
@@ -62,7 +77,7 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
   }
 }
 
-async function closeServer(server: NonNullable<ReturnType<typeof startManagedExecutionEndpoint>>) {
+async function closeServer(server: Server) {
   await new Promise<void>((resolve, reject) => {
     server.close((error) => (error ? reject(error) : resolve()))
   })
@@ -74,11 +89,36 @@ async function validateWithAiDe(receipt: unknown, label: string): Promise<string
   fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
 
   try {
-    const result = validateReceiptWithAiDe(receiptPath)
-    if (!result.valid) {
-      throw new Error(`${label}: AI-DE validator rejected receipt: ${result.output}`)
-    }
-    return result.output
+    return await new Promise((resolve, reject) => {
+      const validatorSource = `
+        const fs = require('node:fs')
+        const { validateJsonSchema } = require(${JSON.stringify(AI_DE_SCHEMA_VALIDATOR)})
+        const receipt = JSON.parse(fs.readFileSync(process.env.ORCA_RECEIPT_PATH, 'utf8'))
+        const schema = JSON.parse(fs.readFileSync(${JSON.stringify(AI_DE_RECEIPT_SCHEMA)}, 'utf8'))
+        validateJsonSchema(receipt, schema)
+        process.stdout.write('SCHEMA_VALIDATION_PASSED')
+      `
+      const validator = spawn(process.execPath, ['-e', validatorSource], {
+        env: { ...process.env, ORCA_RECEIPT_PATH: receiptPath }
+      })
+      let stdout = ''
+      let stderr = ''
+
+      validator.stdout.on('data', (chunk: Buffer) => {
+        stdout += chunk.toString('utf8')
+      })
+      validator.stderr.on('data', (chunk: Buffer) => {
+        stderr += chunk.toString('utf8')
+      })
+      validator.on('error', reject)
+      validator.on('close', (code) => {
+        if (code === 0) {
+          resolve(stdout.trim())
+          return
+        }
+        reject(new Error(`${label}: AI-DE validator exited ${code}: ${stderr.trim()}`))
+      })
+    })
   } finally {
     fs.rmSync(outputDir, { recursive: true, force: true })
   }
@@ -109,25 +149,38 @@ async function postRawExecute(port: number, body: string) {
 }
 
 describe('managed execution endpoint authorization path', () => {
+  beforeAll(() => {
+    fs.writeFileSync(
+      authorityRegistryPath,
+      JSON.stringify({
+        'managed-e2e-authority': {
+          publicKey: keyPair.publicKey,
+          revoked: false
+        }
+      })
+    )
+    process.env.ORCA_MANAGED_AUTHORITY_REGISTRY_PATH = authorityRegistryPath
+    expect(isAuthorityRegistryLoaded()).toBe(true)
+  })
+
+  afterAll(() => {
+    if (previousAuthorityRegistryPath === undefined) {
+      delete process.env.ORCA_MANAGED_AUTHORITY_REGISTRY_PATH
+    } else {
+      process.env.ORCA_MANAGED_AUTHORITY_REGISTRY_PATH = previousAuthorityRegistryPath
+    }
+    fs.rmSync(authorityRegistryDir, { recursive: true, force: true })
+  })
+
   afterEach(() => {
     setProcessRuntimeProfile('default')
-    getAuthorityRegistry().clear()
   })
 
   it('executes a correctly signed envelope through the protected endpoint', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
-    getAuthorityRegistry().set('managed-e2e-authority', {
-      publicKey: keyPair.publicKey,
-      revoked: false
-    })
 
-    const server = startManagedExecutionEndpoint({ port: 0 })
+    const server = await startManagedExecutionEndpoint({ port: 0 })
     expect(server).not.toBeNull()
-
-    await new Promise<void>((resolve, reject) => {
-      server!.once('listening', resolve)
-      server!.once('error', reject)
-    })
 
     try {
       const address = server!.address()
@@ -156,13 +209,8 @@ describe('managed execution endpoint authorization path', () => {
   it('rejects malformed request shapes before issuer dereferences nullable fields', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
 
-    const server = startManagedExecutionEndpoint({ port: 0 })
+    const server = await startManagedExecutionEndpoint({ port: 0 })
     expect(server).not.toBeNull()
-
-    await new Promise<void>((resolve, reject) => {
-      server!.once('listening', resolve)
-      server!.once('error', reject)
-    })
 
     try {
       const address = server!.address()
@@ -187,18 +235,9 @@ describe('managed execution endpoint authorization path', () => {
 
   it('validates the endpoint-generated orca receipts for all three outcomes with AI-DE', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
-    getAuthorityRegistry().set('managed-e2e-authority', {
-      publicKey: keyPair.publicKey,
-      revoked: false
-    })
 
-    const server = startManagedExecutionEndpoint({ port: 0 })
+    const server = await startManagedExecutionEndpoint({ port: 0 })
     expect(server).not.toBeNull()
-
-    await new Promise<void>((resolve, reject) => {
-      server!.once('listening', resolve)
-      server!.once('error', reject)
-    })
 
     try {
       const address = server!.address()
@@ -243,24 +282,15 @@ describe('managed execution endpoint authorization path', () => {
 
   it('replays the stored receipt without a second effect and denies a different payload', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
-    getAuthorityRegistry().set('managed-e2e-authority', {
-      publicKey: keyPair.publicKey,
-      revoked: false
-    })
 
     let protectedEffectCalls = 0
-    const server = startManagedExecutionEndpoint({
+    const server = await startManagedExecutionEndpoint({
       port: 0,
       onProtectedEffect: () => {
         protectedEffectCalls += 1
       }
     })
     expect(server).not.toBeNull()
-
-    await new Promise<void>((resolve, reject) => {
-      server!.once('listening', resolve)
-      server!.once('error', reject)
-    })
 
     try {
       const address = server!.address()

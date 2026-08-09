@@ -40,6 +40,26 @@ supplied-but-unknown value is rejected outright: silently mapping a typo to
 `default` would weaken a managed boundary, so startup calls
 `resolveOrcaRuntimeProfileAtStartup` with a fail-closed handler instead.
 
+## Managed execution authority registry
+
+The managed execution endpoint is opened only after the main process loads the
+authority registry at startup. Set `ORCA_MANAGED_AUTHORITY_REGISTRY_PATH` to a
+JSON file containing an `authority_id` to Ed25519 SPKI PEM mapping; the format
+and handling rules are documented in [`config/managed-execution/README.md`](../../config/managed-execution/README.md).
+
+The registry is process-private and immutable after startup. It has no runtime
+registration, revocation, or mutable-map API. To add or revoke execution
+authority, change the protected configuration file and restart Orca. Missing,
+empty, or invalid configuration leaves the managed endpoint closed rather than
+opening a listener that rejects every request. The registry file is an
+authorization policy: write access to it grants managed execution authority and
+must be protected accordingly.
+
+The managed endpoint defaults to loopback port `6770` (override with
+`ORCA_MANAGED_ENDPOINT_PORT`). This is separate from Orca's production runtime
+RPC on `6768`; `6769` is reserved for the development WebSocket path and test
+fixtures rather than a managed listener.
+
 ## Synchronous Bridge
 
 The renderer reads the profile **synchronously**. An asynchronous read would
