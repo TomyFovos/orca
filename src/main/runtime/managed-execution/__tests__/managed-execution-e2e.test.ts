@@ -21,7 +21,6 @@ const AI_DE_RECEIPT_SCHEMA = path.join(
   AI_DE_PATH,
   'knowledge/schemas/execution-receipt-1.schema.json'
 )
-
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
@@ -276,6 +275,12 @@ describe('managed execution endpoint authorization path', () => {
       expect(errorSpy).toHaveBeenNthCalledWith(
         2,
         '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=binding rule=record'
+      )
+      const invalidJson = await postRawExecute(port, '{"envelope":')
+      expect(invalidJson.status).toBe(400)
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        3,
+        '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=request rule=json'
       )
       expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(sensitivePayloadValue)
     } finally {

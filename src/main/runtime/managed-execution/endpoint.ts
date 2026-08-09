@@ -160,7 +160,9 @@ export async function startManagedExecutionEndpoint(
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify(receipt))
       } else if (error instanceof SyntaxError) {
-        console.error(`[managed-execution] Malformed request: ${error.message}`)
+        console.error(
+          '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=request rule=json'
+        )
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: { code: IssuerErrorCode.MALFORMED_REQUEST } }))
       } else {
