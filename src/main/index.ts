@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- main-process entry point; owns app lifecycle, service wiring, window creation, and hook/daemon startup with no cleaner split seam. */
 import { existsSync, statSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
+import type { Server } from 'node:http'
 import os from 'node:os'
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme, type Tray } from 'electron'
 import { initTccPromptNotice, stopTccPromptNotice } from './macos-tcc-prompt-notice'
@@ -68,9 +69,12 @@ import { triggerStartupNotificationRegistration } from './ipc/notifications'
 import { OrcaRuntimeService, type RuntimeWorktreeLifecycleEvent } from './runtime/orca-runtime'
 import {
   resolveOrcaRuntimeProfileAtStartup,
-  setProcessRuntimeProfile
+  setProcessRuntimeProfile,
+  MANAGED_ORCA_RUNTIME_PROFILE
 } from './runtime/runtime-profile'
 import { assertManagedExecutionAuthorized } from './runtime/managed-execution/authorization'
+import { isAuthorityRegistryLoaded } from './runtime/managed-execution/authority-registry'
+import { startManagedExecutionEndpoint } from './runtime/managed-execution/endpoint'
 import { loadAgentSessionClaimSigner } from './runtime/agent-session-claim-identity'
 import {
   fingerprintOrchestrationPeer,
@@ -384,6 +388,42 @@ const runtimeProfile = resolveOrcaRuntimeProfileAtStartup(process.env, (error) =
   throw error
 })
 setProcessRuntimeProfile(runtimeProfile)
+const managedAuthorityRegistryLoaded =
+  runtimeProfile === MANAGED_ORCA_RUNTIME_PROFILE ? isAuthorityRegistryLoaded() : false
+let managedExecutionEndpoint: Server | null = null
+
+function handleManagedExecutionProtectedEffect(payload: Record<string, unknown>): void {
+  console.log(
+    `[managed-execution] Protected effect executed: payload_fields=${Object.keys(payload).length}`
+  )
+}
+
+async function startManagedExecutionEndpointIfConfigured(): Promise<void> {
+  if (
+    runtimeProfile !== MANAGED_ORCA_RUNTIME_PROFILE ||
+    !managedAuthorityRegistryLoaded ||
+    !isAuthorityRegistryLoaded() ||
+    managedExecutionEndpoint
+  ) {
+    return
+  }
+
+  try {
+    managedExecutionEndpoint = await startManagedExecutionEndpoint({
+      onProtectedEffect: handleManagedExecutionProtectedEffect
+    })
+  } catch (error) {
+    console.error('[managed-execution] Failed to start endpoint:', error)
+    app.exit(1)
+  }
+}
+
+function stopManagedExecutionEndpoint(): void {
+  managedExecutionEndpoint?.close()
+  managedExecutionEndpoint = null
+}
+
+app.on('before-quit', stopManagedExecutionEndpoint)
 
 function updateGpuAccelerationAboutPanel(): void {
   app.setAboutPanelOptions(
@@ -2827,6 +2867,7 @@ void app.whenReady().then(async () => {
       console.error('[runtime] Failed to start headless RPC transport:', error)
       throw error
     })
+    await startManagedExecutionEndpointIfConfigured()
     settleServeDesktopActivation()
     installServeSignalHandlers()
     // Why: headless serve has no renderer to run the normal cli:install flow; do it here for macOS/Linux only (Windows-excluded: install() only mutates registry PATH, not child terminals).
@@ -2888,6 +2929,7 @@ void app.whenReady().then(async () => {
   if (!runtimeRpcStartResult.ok) {
     void showRuntimeRpcStartupFailureDialog(win, runtimeRpcStartResult.error)
   }
+  await startManagedExecutionEndpointIfConfigured()
 
   const cloudAuth = getOrcaCloudAuthConfig()
   if (cloudAuth.configured) {

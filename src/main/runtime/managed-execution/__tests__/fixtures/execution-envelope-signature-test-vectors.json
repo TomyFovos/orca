@@ -1,0 +1,64 @@
+{
+  "version": "1.0",
+  "description": "Fixed Ed25519 execution-envelope/1 signature vector. The key is test-only and must never be used by a production authority.",
+  "vectors": [
+    {
+      "id": "execution-envelope-signature-v1",
+      "packet_for_digest": {
+        "schema": "ai-de.execution-packet/1",
+        "packet_id": "550e8400-e29b-42d3-a456-426614174001",
+        "case_id": "issue-96-vector",
+        "purpose": "execution-envelope-signature-vector"
+      },
+      "envelope": {
+        "schema": "ai-de.execution-envelope/1",
+        "binding": {
+          "authority_id": "test-execution-envelope-vector-v1",
+          "operation": "prepare",
+          "request_id": "550e8400-e29b-42d3-a456-426614174000",
+          "case_id": "issue-96-vector",
+          "task_id": "task-96-vector",
+          "attempt_id": "attempt-96-vector",
+          "packet_digest": "sha256:8739c2a22443b452f747c46e213626d5ad6829614647fd5f03e79919fe975410",
+          "launch_plan_digest": null,
+          "payload_digest": "sha256:92ae7d1f9270071dddf8a07e82e4e78d83d4b6beff6b899560383374f35afcc7",
+          "protocol_version": "ai-de.protocol/1",
+          "schema_version": "execution-request-1"
+        },
+        "payload": {
+          "schema": "ai-de.execution-request/1",
+          "operation": "prepare",
+          "request_id": "550e8400-e29b-42d3-a456-426614174000",
+          "case_id": "issue-96-vector",
+          "task_id": "task-96-vector",
+          "attempt_id": "attempt-96-vector",
+          "packet_digest": "sha256:8739c2a22443b452f747c46e213626d5ad6829614647fd5f03e79919fe975410",
+          "launch_plan_digest": null,
+          "protocol_version": "ai-de.protocol/1",
+          "schema_version": "execution-request-1",
+          "issued_at": "2030-01-01T00:00:00.000Z",
+          "expires_at": "2030-01-01T00:05:00.000Z",
+          "operation_payload": {
+            "adapter": "codex"
+          }
+        },
+        "issued_at": "2030-01-01T00:00:00.000Z",
+        "expires_at": "2030-01-01T00:05:00.000Z",
+        "signature": {
+          "algorithm": "ed25519",
+          "canonicalization": "RFC8785-JCS",
+          "value": "3abc915de9b9b59c68daf9a4f0daabea029ba2e10e774d3b4eba1a1ef84ba5cb31086ff395413234c30543ead538968cc597664c8b2ed063fa6e715256212f03"
+        }
+      },
+      "signing_key": {
+        "public_key_spki_base64": "MCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo="
+      },
+      "expected": {
+        "canonical_preimage_utf8": "{\"binding\":{\"attempt_id\":\"attempt-96-vector\",\"authority_id\":\"test-execution-envelope-vector-v1\",\"case_id\":\"issue-96-vector\",\"launch_plan_digest\":null,\"operation\":\"prepare\",\"packet_digest\":\"sha256:8739c2a22443b452f747c46e213626d5ad6829614647fd5f03e79919fe975410\",\"payload_digest\":\"sha256:92ae7d1f9270071dddf8a07e82e4e78d83d4b6beff6b899560383374f35afcc7\",\"protocol_version\":\"ai-de.protocol/1\",\"request_id\":\"550e8400-e29b-42d3-a456-426614174000\",\"schema_version\":\"execution-request-1\",\"task_id\":\"task-96-vector\"},\"expires_at\":\"2030-01-01T00:05:00.000Z\",\"issued_at\":\"2030-01-01T00:00:00.000Z\"}",
+        "canonical_preimage_hex": "7b2262696e64696e67223a7b22617474656d70745f6964223a22617474656d70742d39362d766563746f72222c22617574686f726974795f6964223a22746573742d657865637574696f6e2d656e76656c6f70652d766563746f722d7631222c22636173655f6964223a2269737375652d39362d766563746f72222c226c61756e63685f706c616e5f646967657374223a6e756c6c2c226f7065726174696f6e223a2270726570617265222c227061636b65745f646967657374223a227368613235363a38373339633261323234343362343532663734376334366532313336323664356164363832393631343634376664356630336537393931396665393735343130222c227061796c6f61645f646967657374223a227368613235363a39326165376431663932373030373164646466386130376538326534653738643833643462366265666636623839393536303338333337346633356166636337222c2270726f746f636f6c5f76657273696f6e223a2261692d64652e70726f746f636f6c2f31222c22726571756573745f6964223a2235353065383430302d653239622d343264332d613435362d343236363134313734303030222c22736368656d615f76657273696f6e223a22657865637574696f6e2d726571756573742d31222c227461736b5f6964223a227461736b2d39362d766563746f72227d2c22657870697265735f6174223a22323033302d30312d30315430303a30353a30302e3030305a222c226973737565645f6174223a22323033302d30312d30315430303a30303a30302e3030305a227d",
+        "canonical_preimage_sha256": "d6a97ff0cb06160b0fb8064448c7f06b8382440d482e3b60ef83285e961f3647",
+        "signature_hex": "3abc915de9b9b59c68daf9a4f0daabea029ba2e10e774d3b4eba1a1ef84ba5cb31086ff395413234c30543ead538968cc597664c8b2ed063fa6e715256212f03"
+      }
+    }
+  ]
+}

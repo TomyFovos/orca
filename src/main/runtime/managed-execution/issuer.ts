@@ -1,5 +1,5 @@
 import { verifyEd25519Signature } from './crypto'
-import { getAuthorityRegistry } from './authority-registry'
+import { lookupAuthority } from './authority-registry'
 import {
   mintManagedExecutionAuthorization,
   type ExternalControlPlaneAuthorityBinding,
@@ -32,18 +32,8 @@ export type SignedEnvelope = {
   expires_at: string
 }
 
-export type OperationPayload = {
-  case_id: string
-  task_id: string
-  attempt_id: string
-  packet_digest: string
-  [key: string]: unknown
-}
-
-export type ExecuteRequest = {
-  envelope: SignedEnvelope
-  operation_payload: OperationPayload
-}
+/** The execution endpoint accepts the signed envelope as its complete request. */
+export type ExecuteRequest = SignedEnvelope
 
 export enum IssuerErrorCode {
   INVALID_SIGNATURE = 'INVALID_SIGNATURE',
@@ -59,36 +49,52 @@ export enum IssuerErrorCode {
   MALFORMED_REQUEST = 'MALFORMED_REQUEST'
 }
 
+export type IssuerRejectionDetail = Readonly<{
+  layer: string
+  field: string
+  rule: string
+}>
+
 export class IssuerError extends Error {
   constructor(
     public readonly code: IssuerErrorCode,
-    message: string
+    message: string,
+    public readonly detail: IssuerRejectionDetail
   ) {
     super(message)
     this.name = 'IssuerError'
   }
 }
 
-export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuthorization {
+export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAuthorization {
   cleanupExpiredRequests()
 
-  const { envelope, operation_payload } = request
-
   // 1. authority_id を registry と照合（署名検証より先）
-  const registry = getAuthorityRegistry()
-  const authorityInfo = registry.get(envelope.binding.authority_id)
+  const authorityInfo = lookupAuthority(envelope.binding.authority_id)
   if (!authorityInfo) {
-    throw new IssuerError(IssuerErrorCode.UNKNOWN_AUTHORITY_ID, 'Unknown authority_id')
+    throw new IssuerError(IssuerErrorCode.UNKNOWN_AUTHORITY_ID, 'Unknown authority_id', {
+      layer: 'authority',
+      field: 'authority_id',
+      rule: 'registry-membership'
+    })
   }
 
   // 1.5. authority_id が失効していないか確認
   if (authorityInfo.revoked) {
-    throw new IssuerError(IssuerErrorCode.REVOKED_AUTHORITY, 'Authority is revoked')
+    throw new IssuerError(IssuerErrorCode.REVOKED_AUTHORITY, 'Authority is revoked', {
+      layer: 'authority',
+      field: 'authority_id',
+      rule: 'not-revoked'
+    })
   }
 
   // 2. Ed25519 署名を検証（公開鍵を渡す）
   if (!verifyEd25519Signature(envelope, authorityInfo.publicKey)) {
-    throw new IssuerError(IssuerErrorCode.INVALID_SIGNATURE, 'Invalid signature')
+    throw new IssuerError(IssuerErrorCode.INVALID_SIGNATURE, 'Invalid signature', {
+      layer: 'signature',
+      field: 'value',
+      rule: 'ed25519-verification'
+    })
   }
 
   // 3. operation を検証
@@ -96,7 +102,12 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   if (!validOperations.includes(envelope.binding.operation)) {
     throw new IssuerError(
       IssuerErrorCode.UNSUPPORTED_OPERATION,
-      `Unsupported operation: ${envelope.binding.operation}`
+      `Unsupported operation: ${envelope.binding.operation}`,
+      {
+        layer: 'binding',
+        field: 'operation',
+        rule: 'supported-operation'
+      }
     )
   }
 
@@ -106,9 +117,13 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   // 5. binding 11フィールドを検証
   validateBinding(envelope.binding)
 
-  // 6. payload_digest で operation_payload の照合
-  if (!verifyPayloadDigest(envelope, operation_payload)) {
-    throw new IssuerError(IssuerErrorCode.PAYLOAD_DIGEST_MISMATCH, 'payload_digest mismatch')
+  // 6. payload_digest で envelope.payload の照合
+  if (!verifyPayloadDigest(envelope)) {
+    throw new IssuerError(IssuerErrorCode.PAYLOAD_DIGEST_MISMATCH, 'payload_digest mismatch', {
+      layer: 'binding',
+      field: 'payload_digest',
+      rule: 'matches-envelope-payload'
+    })
   }
 
   // 7. request_id の単回使用を検証（リプレイ防御）
@@ -118,11 +133,20 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
     if (existingRequest.bindingCanonical !== bindingCanonical) {
       throw new IssuerError(
         IssuerErrorCode.REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD,
-        'request_id was reused with different payload'
+        'request_id was reused with different payload',
+        {
+          layer: 'binding',
+          field: 'request_id',
+          rule: 'same-binding'
+        }
       )
     }
     logReplayAttempt(envelope.binding.request_id)
-    throw new IssuerError(IssuerErrorCode.REPLAY_ATTACK, 'request_id already used')
+    throw new IssuerError(IssuerErrorCode.REPLAY_ATTACK, 'request_id already used', {
+      layer: 'binding',
+      field: 'request_id',
+      rule: 'single-use'
+    })
   }
 
   // 8. capability を mint
@@ -153,18 +177,31 @@ function validateTimestamps(issued_at: string, expires_at: string) {
   const expiresAt = new Date(expires_at).getTime()
 
   if (issuedAt > now + MAX_CLOCK_SKEW_MS) {
-    throw new IssuerError(IssuerErrorCode.FUTURE_ISSUED_AT, 'issued_at is too far in the future')
+    throw new IssuerError(IssuerErrorCode.FUTURE_ISSUED_AT, 'issued_at is too far in the future', {
+      layer: 'envelope',
+      field: 'issued_at',
+      rule: 'within-clock-skew'
+    })
   }
 
   if (expiresAt < now) {
-    throw new IssuerError(IssuerErrorCode.EXPIRED_REQUEST, 'expires_at is in the past')
+    throw new IssuerError(IssuerErrorCode.EXPIRED_REQUEST, 'expires_at is in the past', {
+      layer: 'envelope',
+      field: 'expires_at',
+      rule: 'not-expired'
+    })
   }
 
   const duration = expiresAt - issuedAt
   if (duration > MAX_EXPIRY_DURATION_MS) {
     throw new IssuerError(
       IssuerErrorCode.EXPIRED_REQUEST,
-      'expires_at exceeds maximum allowed duration'
+      'expires_at exceeds maximum allowed duration',
+      {
+        layer: 'envelope',
+        field: 'expires_at',
+        rule: 'maximum-duration'
+      }
     )
   }
 }
@@ -186,16 +223,17 @@ function validateBinding(binding: ExternalControlPlaneAuthorityBinding) {
 
   for (const field of requiredFields) {
     if (!(field in binding)) {
-      throw new IssuerError(IssuerErrorCode.INVALID_BINDING, `Missing field: ${field}`)
+      throw new IssuerError(IssuerErrorCode.INVALID_BINDING, `Missing field: ${field}`, {
+        layer: 'binding',
+        field,
+        rule: 'required'
+      })
     }
   }
 }
 
-function verifyPayloadDigest(
-  envelope: SignedEnvelope,
-  operation_payload: OperationPayload
-): boolean {
-  const payloadBytes = canonicalBytes(operation_payload)
+function verifyPayloadDigest(envelope: SignedEnvelope): boolean {
+  const payloadBytes = canonicalBytes(envelope.payload)
   const calculatedDigest = `sha256:${createHash('sha256').update(payloadBytes).digest('hex')}`
   return calculatedDigest === envelope.binding.payload_digest
 }
