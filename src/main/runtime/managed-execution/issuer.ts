@@ -72,7 +72,7 @@ export class IssuerError extends Error {
 export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuthorization {
   cleanupExpiredRequests()
 
-  const { envelope, operation_payload } = request
+  const { envelope } = request
 
   // 1. authority_id を registry と照合（署名検証より先）
   const authorityInfo = lookupAuthority(envelope.binding.authority_id)
@@ -105,8 +105,8 @@ export function mintAuthorization(request: ExecuteRequest): ManagedExecutionAuth
   // 5. binding 11フィールドを検証
   validateBinding(envelope.binding)
 
-  // 6. payload_digest で operation_payload の照合
-  if (!verifyPayloadDigest(envelope, operation_payload)) {
+  // 6. payload_digest で envelope.payload の照合
+  if (!verifyPayloadDigest(envelope)) {
     throw new IssuerError(IssuerErrorCode.PAYLOAD_DIGEST_MISMATCH, 'payload_digest mismatch')
   }
 
@@ -190,11 +190,8 @@ function validateBinding(binding: ExternalControlPlaneAuthorityBinding) {
   }
 }
 
-function verifyPayloadDigest(
-  envelope: SignedEnvelope,
-  operation_payload: OperationPayload
-): boolean {
-  const payloadBytes = canonicalBytes(operation_payload)
+function verifyPayloadDigest(envelope: SignedEnvelope): boolean {
+  const payloadBytes = canonicalBytes(envelope.payload)
   const calculatedDigest = `sha256:${createHash('sha256').update(payloadBytes).digest('hex')}`
   return calculatedDigest === envelope.binding.payload_digest
 }
