@@ -6,7 +6,7 @@ with this shape:
 
 ```json
 {
-  "test-orca-authority": {
+  "managed-orca-authority": {
     "publicKey": "-----BEGIN PUBLIC KEY-----\n...\n-----END PUBLIC KEY-----\n",
     "revoked": false
   }
