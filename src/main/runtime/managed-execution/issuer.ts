@@ -13,10 +13,10 @@ const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
 
 type MintedRequest = {
   request_id: string
-  expires_at: string
   bindingCanonical: string
 }
 
+// Retain request identities for the process lifetime so expiry cannot erase replay evidence.
 const mintedRequests = new Map<string, MintedRequest>()
 
 export type SignedEnvelope = {
@@ -67,7 +67,8 @@ export class IssuerError extends Error {
 }
 
 export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAuthorization {
-  cleanupExpiredRequests()
+  // Validate the binding shape before any lookup so malformed requests fail closed.
+  validateBinding(envelope.binding)
 
   // 1. authority_id を registry と照合（署名検証より先）
   const authorityInfo = lookupAuthority(envelope.binding.authority_id)
@@ -88,7 +89,8 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
     })
   }
 
-  // 2. Ed25519 署名を検証（公開鍵を渡す）
+  // 2. 署名パラメータと Ed25519 署名を検証（公開鍵を渡す）
+  validateSignatureParameters(envelope.signature)
   if (!verifyEd25519Signature(envelope, authorityInfo.publicKey)) {
     throw new IssuerError(IssuerErrorCode.INVALID_SIGNATURE, 'Invalid signature', {
       layer: 'signature',
@@ -97,27 +99,7 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
     })
   }
 
-  // 3. operation を検証
-  const validOperations = ['prepare', 'start', 'stop', 'cleanup']
-  if (!validOperations.includes(envelope.binding.operation)) {
-    throw new IssuerError(
-      IssuerErrorCode.UNSUPPORTED_OPERATION,
-      `Unsupported operation: ${envelope.binding.operation}`,
-      {
-        layer: 'binding',
-        field: 'operation',
-        rule: 'supported-operation'
-      }
-    )
-  }
-
-  // 4. タイムスタンプを検証（envelope 直下の issued_at/expires_at）
-  validateTimestamps(envelope.issued_at, envelope.expires_at)
-
-  // 5. binding 11フィールドを検証
-  validateBinding(envelope.binding)
-
-  // 6. payload_digest で envelope.payload の照合
+  // 3. 署名対象 payload の digest を検証
   if (!verifyPayloadDigest(envelope)) {
     throw new IssuerError(IssuerErrorCode.PAYLOAD_DIGEST_MISMATCH, 'payload_digest mismatch', {
       layer: 'binding',
@@ -126,7 +108,8 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
     })
   }
 
-  // 7. request_id の単回使用を検証（リプレイ防御）
+  // 4. replay を期限判定より先に照合する。期限切れ既知 request を replayed と区別し、
+  //    呼び出し側が新しい request_id で二重実行することを防ぐ。
   const bindingCanonical = canonicalBytes(envelope.binding).toString('utf8')
   const existingRequest = mintedRequests.get(envelope.binding.request_id)
   if (existingRequest) {
@@ -149,25 +132,62 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
     })
   }
 
-  // 8. capability を mint
+  // 5. 未知 request の期限を検証。既知 request は上の replay gate で既に返している。
+  validateTimestamps(envelope.issued_at, envelope.expires_at)
+
+  // operation は署名検証より後、replay/期限判定後の実行ポリシーとして検証する。
+  const validOperations = ['prepare', 'start', 'stop', 'cleanup']
+  if (!validOperations.includes(envelope.binding.operation)) {
+    throw new IssuerError(
+      IssuerErrorCode.UNSUPPORTED_OPERATION,
+      `Unsupported operation: ${envelope.binding.operation}`,
+      {
+        layer: 'binding',
+        field: 'operation',
+        rule: 'supported-operation'
+      }
+    )
+  }
+
+  // 6. capability を mint
   const authorization = mintManagedExecutionAuthorization()
 
-  // 9. request_id を記録
+  // 7. request_id を記録（期限切れ後の既知 replay 判定に必要なため保持する）
   mintedRequests.set(envelope.binding.request_id, {
     request_id: envelope.binding.request_id,
-    expires_at: envelope.expires_at,
     bindingCanonical
   })
 
   return authorization
 }
 
-function cleanupExpiredRequests() {
-  const now = Date.now()
-  for (const [requestId, request] of mintedRequests.entries()) {
-    if (new Date(request.expires_at).getTime() < now) {
-      mintedRequests.delete(requestId)
-    }
+function validateSignatureParameters(signature: SignedEnvelope['signature']) {
+  if (signature.algorithm !== 'ed25519') {
+    throw new IssuerError(IssuerErrorCode.INVALID_SIGNATURE, 'Unsupported signature algorithm', {
+      layer: 'signature',
+      field: 'algorithm',
+      rule: 'ed25519'
+    })
+  }
+
+  if (signature.canonicalization !== 'RFC8785-JCS') {
+    throw new IssuerError(
+      IssuerErrorCode.INVALID_SIGNATURE,
+      'Unsupported signature canonicalization',
+      {
+        layer: 'signature',
+        field: 'canonicalization',
+        rule: 'RFC8785-JCS'
+      }
+    )
+  }
+
+  if (typeof signature.value !== 'string') {
+    throw new IssuerError(IssuerErrorCode.INVALID_SIGNATURE, 'Invalid signature value', {
+      layer: 'signature',
+      field: 'value',
+      rule: 'hex-encoded-ed25519'
+    })
   }
 }
 

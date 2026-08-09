@@ -31,7 +31,6 @@ type ExecutionReceipt = {
 }
 
 type StoredAcceptedReceipt = {
-  expires_at: string
   receipt: ExecutionReceipt & {
     outcome: 'accepted'
     backend_ref: string
@@ -39,12 +38,11 @@ type StoredAcceptedReceipt = {
   }
 }
 
-const completedReceipts = new Map<string, StoredAcceptedReceipt>()
+const completedReceipts = new Map<string, StoredAcceptedReceipt>() // Retain expired-known receipts.
 
 export async function startManagedExecutionEndpoint(
   config: EndpointConfig = {}
 ): Promise<Server | null> {
-  // managed profile でのみ listen
   if (getProcessRuntimeProfile() !== MANAGED_ORCA_RUNTIME_PROFILE) {
     return null
   }
@@ -59,7 +57,6 @@ export async function startManagedExecutionEndpoint(
 
   const host = config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_HOST
   const port = resolvePort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
-  const onProtectedEffect = config.onProtectedEffect
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'POST' || req.url !== '/execute') {
@@ -71,7 +68,6 @@ export async function startManagedExecutionEndpoint(
     let envelope: ExecuteRequest | undefined
 
     try {
-      cleanupExpiredReceipts()
       const body = await readBody(req)
       const parsedEnvelope = parseExecuteRequest(JSON.parse(body))
       if (!parsedEnvelope) {
@@ -87,7 +83,7 @@ export async function startManagedExecutionEndpoint(
       // 保護された効果を実行（この例では何もしない）
       // 実際には operation に応じた処理を行う
       assertManagedExecutionAuthorized(envelope.binding.operation, authorization)
-      onProtectedEffect?.(envelope.payload)
+      config.onProtectedEffect?.(envelope.payload)
 
       // 成功応答（execution-receipt/1 準拠、outcome=accepted）
       const receipt: StoredAcceptedReceipt['receipt'] = {
@@ -107,7 +103,6 @@ export async function startManagedExecutionEndpoint(
       }
 
       completedReceipts.set(envelope.binding.request_id, {
-        expires_at: envelope.expires_at,
         receipt
       })
 
@@ -235,15 +230,6 @@ function listenForStartup(server: Server, port: number, host: string): Promise<v
   })
 }
 
-function cleanupExpiredReceipts() {
-  const now = Date.now()
-  for (const [requestId, stored] of completedReceipts.entries()) {
-    if (new Date(stored.expires_at).getTime() < now) {
-      completedReceipts.delete(requestId)
-    }
-  }
-}
-
 type JsonRecord = Record<string, unknown>
 type ShapeLayer = 'envelope' | 'binding' | 'signature' | 'payload'
 type ShapeRule = 'record' | 'string' | 'constant' | 'nullable-string' | 'unexpected'
@@ -347,7 +333,6 @@ function parseExecuteRequest(value: unknown): ExecuteRequest | null {
       return rejectMalformedRequestShape(value, 'envelope', field, 'unexpected')
     }
   }
-
   return value as unknown as ExecuteRequest
 }
 

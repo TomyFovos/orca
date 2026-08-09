@@ -177,6 +177,7 @@ describe('managed execution endpoint authorization path', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     setProcessRuntimeProfile('default')
   })
 
@@ -420,6 +421,128 @@ describe('managed execution endpoint authorization path', () => {
       })
       expect(protectedEffectCalls).toBe(1)
     } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('returns the original receipt for an expired known request without rerunning the effect', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const initialTime = Date.now()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(initialTime)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const acceptedRequest = createSignedRequest()
+      const accepted = await postExecute(port, acceptedRequest)
+      expect(accepted.status).toBe(200)
+      expect(accepted.receipt.outcome).toBe('accepted')
+
+      vi.setSystemTime(initialTime + 120_000)
+      const replayed = await postExecute(port, acceptedRequest)
+
+      expect(replayed.status).toBe(200)
+      expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
+      expect(replayed.receipt.backend_session_id).toBe(accepted.receipt.backend_session_id)
+      expect(replayed.receipt.accepted_at).toBe(accepted.receipt.accepted_at)
+      expect(protectedEffectCalls).toBe(1)
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects an expired unknown request before starting the effect', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const initialTime = Date.now()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(initialTime)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const expiredRequest = createSignedRequest()
+      vi.setSystemTime(initialTime + 120_000)
+      const rejected = await postExecute(port, expiredRequest)
+
+      expect(rejected.status).toBe(400)
+      expect(rejected.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'EXPIRED_REQUEST'
+      })
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${expiredRequest.binding.request_id} code=EXPIRED_REQUEST layer=envelope field=expires_at rule=not-expired`
+      )
+      expect(protectedEffectCalls).toBe(0)
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects an invalid signature before expiry for an expired envelope and records its reason', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const initialTime = Date.now()
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(initialTime)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const invalidRequest = createSignedRequest()
+      invalidRequest.signature.value = 'b'.repeat(128)
+      vi.setSystemTime(initialTime + 120_000)
+      const rejected = await postExecute(port, invalidRequest)
+
+      expect(rejected.status).toBe(400)
+      expect(rejected.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'INVALID_SIGNATURE'
+      })
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${invalidRequest.binding.request_id} code=INVALID_SIGNATURE layer=signature field=value rule=ed25519-verification`
+      )
+      expect(protectedEffectCalls).toBe(0)
+    } finally {
+      errorSpy.mockRestore()
       await closeServer(server!)
     }
   })
