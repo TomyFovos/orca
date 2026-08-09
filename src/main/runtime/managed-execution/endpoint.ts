@@ -10,7 +10,7 @@ const DEFAULT_HOST = '127.0.0.1'
 export type EndpointConfig = {
   host?: string
   port?: number
-  onProtectedEffect?: (request: ExecuteRequest) => void
+  onProtectedEffect?: (envelope: ExecuteRequest) => void
 }
 
 type ExecutionReceipt = {
@@ -68,37 +68,37 @@ export async function startManagedExecutionEndpoint(
       return
     }
 
-    let request: ExecuteRequest | undefined
+    let envelope: ExecuteRequest | undefined
 
     try {
       cleanupExpiredReceipts()
       const body = await readBody(req)
-      const parsedRequest = parseExecuteRequest(JSON.parse(body))
-      if (!parsedRequest) {
+      const parsedEnvelope = parseExecuteRequest(JSON.parse(body))
+      if (!parsedEnvelope) {
         res.writeHead(400, { 'Content-Type': 'application/json' })
         res.end(JSON.stringify({ error: { code: IssuerErrorCode.MALFORMED_REQUEST } }))
         return
       }
-      request = parsedRequest
+      envelope = parsedEnvelope
 
       // 検証と capability mint
-      const authorization = mintAuthorization(request)
+      const authorization = mintAuthorization(envelope)
 
       // 保護された効果を実行（この例では何もしない）
       // 実際には operation に応じた処理を行う
-      assertManagedExecutionAuthorized(request.envelope.binding.operation, authorization)
-      onProtectedEffect?.(request)
+      assertManagedExecutionAuthorized(envelope.binding.operation, authorization)
+      onProtectedEffect?.(envelope)
 
       // 成功応答（execution-receipt/1 準拠、outcome=accepted）
       const receipt: StoredAcceptedReceipt['receipt'] = {
         schema: 'ai-de.execution-receipt/1',
-        request_id: request.envelope.binding.request_id,
-        operation: request.envelope.binding.operation,
-        case_id: request.envelope.binding.case_id,
-        task_id: request.envelope.binding.task_id,
-        attempt_id: request.envelope.binding.attempt_id,
-        protocol_version: request.envelope.binding.protocol_version,
-        schema_version: request.envelope.binding.schema_version,
+        request_id: envelope.binding.request_id,
+        operation: envelope.binding.operation,
+        case_id: envelope.binding.case_id,
+        task_id: envelope.binding.task_id,
+        attempt_id: envelope.binding.attempt_id,
+        protocol_version: envelope.binding.protocol_version,
+        schema_version: envelope.binding.schema_version,
         outcome: 'accepted',
         backend_kind: 'orca',
         backend_ref: 'orca-backend-1',
@@ -106,23 +106,25 @@ export async function startManagedExecutionEndpoint(
         accepted_at: new Date().toISOString()
       }
 
-      completedReceipts.set(request.envelope.binding.request_id, {
-        expires_at: request.envelope.expires_at,
+      completedReceipts.set(envelope.binding.request_id, {
+        expires_at: envelope.expires_at,
         receipt
       })
 
       res.writeHead(200, { 'Content-Type': 'application/json' })
       res.end(JSON.stringify(receipt))
     } catch (error) {
-      if (error instanceof IssuerError && request) {
+      if (error instanceof IssuerError && envelope) {
         // エラー応答も receipt 形式（execution-receipt/1 準拠）
-        console.error(`[managed-execution] Request rejected: code=${error.code}`)
+        console.error(
+          `[managed-execution] Request rejected: request_id=${envelope.binding.request_id} code=${error.code} layer=${error.detail.layer} field=${error.detail.field} rule=${error.detail.rule}`
+        )
 
         if (error.code === IssuerErrorCode.REPLAY_ATTACK) {
-          const stored = completedReceipts.get(request.envelope.binding.request_id)
+          const stored = completedReceipts.get(envelope.binding.request_id)
           if (!stored) {
             console.error(
-              `[managed-execution] Replay receipt missing: request_id=${request.envelope.binding.request_id}`
+              `[managed-execution] Replay receipt missing: request_id=${envelope.binding.request_id}`
             )
             res.writeHead(500, { 'Content-Type': 'application/json' })
             res.end(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }))
@@ -140,13 +142,13 @@ export async function startManagedExecutionEndpoint(
 
         const receipt: ExecutionReceipt = {
           schema: 'ai-de.execution-receipt/1',
-          request_id: request.envelope.binding.request_id,
-          operation: request.envelope.binding.operation,
-          case_id: request.envelope.binding.case_id,
-          task_id: request.envelope.binding.task_id,
-          attempt_id: request.envelope.binding.attempt_id,
-          protocol_version: request.envelope.binding.protocol_version,
-          schema_version: request.envelope.binding.schema_version,
+          request_id: envelope.binding.request_id,
+          operation: envelope.binding.operation,
+          case_id: envelope.binding.case_id,
+          task_id: envelope.binding.task_id,
+          attempt_id: envelope.binding.attempt_id,
+          protocol_version: envelope.binding.protocol_version,
+          schema_version: envelope.binding.schema_version,
           outcome: 'rejected',
           backend_kind: 'orca',
           backend_ref: null,
@@ -241,8 +243,8 @@ function cleanupExpiredReceipts() {
 }
 
 type JsonRecord = Record<string, unknown>
-type ShapeLayer = 'envelope' | 'operation_payload' | 'binding' | 'signature' | 'payload'
-type ShapeRule = 'record' | 'string' | 'constant' | 'nullable-string'
+type ShapeLayer = 'envelope' | 'binding' | 'signature' | 'payload'
+type ShapeRule = 'record' | 'string' | 'constant' | 'nullable-string' | 'unexpected'
 
 function isRecord(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -253,9 +255,11 @@ function isString(value: unknown): value is string {
 }
 
 function requestIdForShapeLog(value: unknown): string {
-  if (!isRecord(value) || !isRecord(value.envelope) || !isRecord(value.envelope.binding)) { return '取得不能' }
+  if (!isRecord(value) || !isRecord(value.binding)) {
+    return '取得不能'
+  }
 
-  const requestId = value.envelope.binding.request_id
+  const requestId = value.binding.request_id
   return isString(requestId) ? requestId : '取得不能'
 }
 
@@ -265,38 +269,81 @@ function rejectMalformedRequestShape(
   field: string,
   rule: ShapeRule
 ): null {
-  console.error(`[managed-execution] Malformed request: request_id=${requestIdForShapeLog(value)} layer=${layer} field=${field} rule=${rule}`)
+  console.error(
+    `[managed-execution] Malformed request: request_id=${requestIdForShapeLog(value)} layer=${layer} field=${field} rule=${rule}`
+  )
   return null
 }
 
 function parseExecuteRequest(value: unknown): ExecuteRequest | null {
-  if (!isRecord(value)) { return rejectMalformedRequestShape(value, 'envelope', 'request', 'record') }
-  if (!isRecord(value.envelope)) { return rejectMalformedRequestShape(value, 'envelope', 'envelope', 'record') }
-  if (!isRecord(value.operation_payload)) { return rejectMalformedRequestShape(value, 'operation_payload', 'operation_payload', 'record') }
+  if (!isRecord(value)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'request', 'record')
+  }
 
-  const envelope = value.envelope
-  const operationPayload = value.operation_payload
-  if (!isRecord(envelope.binding)) { return rejectMalformedRequestShape(value, 'binding', 'binding', 'record') }
-  if (!isRecord(envelope.signature)) { return rejectMalformedRequestShape(value, 'signature', 'signature', 'record') }
-  if (!isRecord(envelope.payload)) { return rejectMalformedRequestShape(value, 'payload', 'payload', 'record') }
+  const envelope = value
+  if (!isRecord(envelope.binding)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'binding', 'record')
+  }
+  if (!isRecord(envelope.signature)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'signature', 'record')
+  }
+  if (!isRecord(envelope.payload)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'payload', 'record')
+  }
 
   const binding = envelope.binding
   const signature = envelope.signature
-  const bindingStringFields = ['authority_id', 'operation', 'request_id', 'case_id', 'task_id', 'attempt_id', 'packet_digest', 'payload_digest', 'protocol_version', 'schema_version'] as const
-  const operationPayloadStringFields = ['case_id', 'task_id', 'attempt_id', 'packet_digest'] as const
+  const bindingStringFields = [
+    'authority_id',
+    'operation',
+    'request_id',
+    'case_id',
+    'task_id',
+    'attempt_id',
+    'packet_digest',
+    'payload_digest',
+    'protocol_version',
+    'schema_version'
+  ] as const
+  const envelopeFields = new Set([
+    'schema',
+    'signature',
+    'binding',
+    'payload',
+    'issued_at',
+    'expires_at'
+  ])
 
-  if (envelope.schema !== 'ai-de.execution-envelope/1') { return rejectMalformedRequestShape(value, 'envelope', 'schema', 'constant') }
-  if (!isString(envelope.issued_at)) { return rejectMalformedRequestShape(value, 'envelope', 'issued_at', 'string') }
-  if (!isString(envelope.expires_at)) { return rejectMalformedRequestShape(value, 'envelope', 'expires_at', 'string') }
-  if (signature.algorithm !== 'ed25519') { return rejectMalformedRequestShape(value, 'signature', 'algorithm', 'constant') }
-  if (signature.canonicalization !== 'RFC8785-JCS') { return rejectMalformedRequestShape(value, 'signature', 'canonicalization', 'constant') }
-  if (!isString(signature.value)) { return rejectMalformedRequestShape(value, 'signature', 'value', 'string') }
-  for (const field of bindingStringFields) {
-    if (!isString(binding[field])) { return rejectMalformedRequestShape(value, 'binding', field, 'string') }
+  if (envelope.schema !== 'ai-de.execution-envelope/1') {
+    return rejectMalformedRequestShape(value, 'envelope', 'schema', 'constant')
   }
-  if (!(binding.launch_plan_digest === null || isString(binding.launch_plan_digest))) { return rejectMalformedRequestShape(value, 'binding', 'launch_plan_digest', 'nullable-string') }
-  for (const field of operationPayloadStringFields) {
-    if (!isString(operationPayload[field])) { return rejectMalformedRequestShape(value, 'operation_payload', field, 'string') }
+  if (!isString(envelope.issued_at)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'issued_at', 'string')
+  }
+  if (!isString(envelope.expires_at)) {
+    return rejectMalformedRequestShape(value, 'envelope', 'expires_at', 'string')
+  }
+  if (signature.algorithm !== 'ed25519') {
+    return rejectMalformedRequestShape(value, 'signature', 'algorithm', 'constant')
+  }
+  if (signature.canonicalization !== 'RFC8785-JCS') {
+    return rejectMalformedRequestShape(value, 'signature', 'canonicalization', 'constant')
+  }
+  if (!isString(signature.value)) {
+    return rejectMalformedRequestShape(value, 'signature', 'value', 'string')
+  }
+  for (const field of bindingStringFields) {
+    if (!isString(binding[field])) {
+      return rejectMalformedRequestShape(value, 'binding', field, 'string')
+    }
+  }
+  if (!(binding.launch_plan_digest === null || isString(binding.launch_plan_digest))) {
+    return rejectMalformedRequestShape(value, 'binding', 'launch_plan_digest', 'nullable-string')
+  }
+  for (const field of Object.keys(envelope)) {
+    if (!envelopeFields.has(field)) {
+      return rejectMalformedRequestShape(value, 'envelope', field, 'unexpected')
+    }
   }
 
   return value as unknown as ExecuteRequest

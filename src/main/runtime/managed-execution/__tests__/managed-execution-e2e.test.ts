@@ -39,7 +39,7 @@ function sha256Canonical(value: unknown): string {
 function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = ''): ExecuteRequest {
   const issuedAt = new Date()
   const expiresAt = new Date(issuedAt.getTime() + 60_000)
-  const operationPayload = {
+  const payload = {
     case_id: `managed-e2e-case${payloadSuffix}`,
     task_id: `managed-e2e-task${payloadSuffix}`,
     attempt_id: `managed-e2e-attempt${payloadSuffix}`,
@@ -48,13 +48,13 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
   const binding = {
     authority_id: 'managed-e2e-authority',
     request_id: requestId,
-    case_id: operationPayload.case_id,
-    task_id: operationPayload.task_id,
-    attempt_id: operationPayload.attempt_id,
-    packet_digest: operationPayload.packet_digest,
+    case_id: payload.case_id,
+    task_id: payload.task_id,
+    attempt_id: payload.attempt_id,
+    packet_digest: payload.packet_digest,
     launch_plan_digest: null,
     operation: 'start',
-    payload_digest: sha256Canonical(operationPayload),
+    payload_digest: sha256Canonical(payload),
     protocol_version: 'ai-de-trusted-launcher/1',
     schema_version: 'execution-envelope-1'
   }
@@ -69,19 +69,16 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
   )
 
   return {
-    envelope: {
-      schema: 'ai-de.execution-envelope/1',
-      signature: {
-        algorithm: 'ed25519',
-        canonicalization: 'RFC8785-JCS',
-        value: signature.toString('hex')
-      },
-      binding,
-      payload: operationPayload,
-      issued_at: issuedAt.toISOString(),
-      expires_at: expiresAt.toISOString()
+    schema: 'ai-de.execution-envelope/1',
+    signature: {
+      algorithm: 'ed25519',
+      canonicalization: 'RFC8785-JCS',
+      value: signature.toString('hex')
     },
-    operation_payload: operationPayload
+    binding,
+    payload,
+    issued_at: issuedAt.toISOString(),
+    expires_at: expiresAt.toISOString()
   }
 }
 
@@ -226,12 +223,15 @@ describe('managed execution endpoint authorization path', () => {
       expect(typeof address).toBe('object')
       const port = (address as AddressInfo).port
 
-      const nullNested = await postRawExecute(
+      const legacyWrapper = await postRawExecute(
         port,
-        JSON.stringify({ envelope: null, operation_payload: null })
+        JSON.stringify({
+          envelope: createSignedRequest(),
+          operation_payload: createSignedRequest().payload
+        })
       )
-      expect(nullNested.status).toBe(400)
-      expect(nullNested.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
+      expect(legacyWrapper.status).toBe(400)
+      expect(legacyWrapper.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
 
       const invalidJson = await postRawExecute(port, '{"envelope":')
       expect(invalidJson.status).toBe(400)
@@ -257,32 +257,73 @@ describe('managed execution endpoint authorization path', () => {
       expect(typeof address).toBe('object')
       const port = (address as AddressInfo).port
 
-      const unavailableRequestId = await postRawExecute(
-        port,
-        JSON.stringify({ envelope: null, operation_payload: null })
-      )
-      expect(unavailableRequestId.status).toBe(400)
-
-      const malformedOperationPayload = createSignedRequest(requestId)
-      const malformedRequest = {
-        ...malformedOperationPayload,
-        operation_payload: {
-          ...malformedOperationPayload.operation_payload,
-          case_id: { sensitivePayloadValue }
-        }
-      }
-      const knownRequestId = await postRawExecute(port, JSON.stringify(malformedRequest))
+      const malformedEnvelope = createSignedRequest(requestId)
+      delete (malformedEnvelope.binding as unknown as Record<string, unknown>).authority_id
+      const knownRequestId = await postRawExecute(port, JSON.stringify(malformedEnvelope))
       expect(knownRequestId.status).toBe(400)
+
+      const legacyWrapper = {
+        envelope: createSignedRequest(),
+        operation_payload: createSignedRequest().payload
+      }
+      const unavailableRequestId = await postRawExecute(port, JSON.stringify(legacyWrapper))
+      expect(unavailableRequestId.status).toBe(400)
 
       expect(errorSpy).toHaveBeenNthCalledWith(
         1,
-        '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=envelope rule=record'
+        `[managed-execution] Malformed request: request_id=${requestId} layer=binding field=authority_id rule=string`
       )
       expect(errorSpy).toHaveBeenNthCalledWith(
         2,
-        `[managed-execution] Malformed request: request_id=${requestId} layer=operation_payload field=case_id rule=string`
+        '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=binding rule=record'
       )
       expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(sensitivePayloadValue)
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('binds the accepted effect to envelope.payload and rejects payload substitution', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: (envelope) => {
+        protectedEffectCalls += 1
+        expect(envelope.payload).toMatchObject({ case_id: 'managed-e2e-case' })
+      }
+    })
+    expect(server).not.toBeNull()
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const acceptedRequest = createSignedRequest()
+      const accepted = await postExecute(port, acceptedRequest)
+      expect(accepted.status).toBe(200)
+
+      const substitutedRequest = createSignedRequest()
+      substitutedRequest.payload = {
+        ...substitutedRequest.payload,
+        case_id: 'substituted-payload'
+      }
+      const rejected = await postExecute(port, substitutedRequest)
+      expect(rejected.status).toBe(400)
+      expect(rejected.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'PAYLOAD_DIGEST_MISMATCH'
+      })
+      expect(protectedEffectCalls).toBe(1)
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${substitutedRequest.binding.request_id} code=PAYLOAD_DIGEST_MISMATCH layer=binding field=payload_digest rule=matches-envelope-payload`
+      )
     } finally {
       errorSpy.mockRestore()
       await closeServer(server!)
@@ -317,7 +358,7 @@ describe('managed execution endpoint authorization path', () => {
       const replayedValidation = await validateWithAiDe(replayed.receipt, 'replayed-orca')
 
       const rejectedRequest = createSignedRequest()
-      rejectedRequest.envelope.signature.value = 'b'.repeat(128)
+      rejectedRequest.signature.value = 'b'.repeat(128)
       const rejected = await postExecute(port, rejectedRequest)
       expect(rejected.status).toBe(400)
       expect(rejected.receipt).toMatchObject({
@@ -363,7 +404,7 @@ describe('managed execution endpoint authorization path', () => {
       expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
 
       const differentPayload = createSignedRequest(
-        acceptedRequest.envelope.binding.request_id,
+        acceptedRequest.binding.request_id,
         '-different-payload'
       )
       const rejected = await postExecute(port, differentPayload)

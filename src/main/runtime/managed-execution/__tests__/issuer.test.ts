@@ -22,42 +22,39 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 60 * 1000) // 1分後
 
-  const operation_payload = {
+  const payload = {
     case_id: 'test-case',
     task_id: 'test-task',
     attempt_id: 'test-attempt',
     packet_digest: `sha256:${'0'.repeat(64)}`
   }
 
-  const payloadBytes = canonicalBytes(operation_payload)
+  const payloadBytes = canonicalBytes(payload)
   const payloadDigest = `sha256:${crypto.createHash('sha256').update(payloadBytes).digest('hex')}`
 
   return {
-    envelope: {
-      schema: 'ai-de.execution-envelope/1',
-      signature: {
-        algorithm: 'ed25519',
-        canonicalization: 'RFC8785-JCS',
-        value: 'a'.repeat(128) // 64 バイトの hex
-      },
-      binding: {
-        authority_id: 'test-authority',
-        operation: 'prepare',
-        request_id: `test-request-${Math.random()}`,
-        case_id: 'test-case',
-        task_id: 'test-task',
-        attempt_id: 'test-attempt',
-        packet_digest: `sha256:${'0'.repeat(64)}`,
-        launch_plan_digest: `sha256:${'1'.repeat(64)}`,
-        payload_digest: payloadDigest,
-        protocol_version: '1',
-        schema_version: '1'
-      },
-      payload: operation_payload,
-      issued_at: now.toISOString(),
-      expires_at: expiresAt.toISOString()
+    schema: 'ai-de.execution-envelope/1',
+    signature: {
+      algorithm: 'ed25519',
+      canonicalization: 'RFC8785-JCS',
+      value: 'a'.repeat(128) // 64 バイトの hex
     },
-    operation_payload,
+    binding: {
+      authority_id: 'test-authority',
+      operation: 'prepare',
+      request_id: `test-request-${Math.random()}`,
+      case_id: 'test-case',
+      task_id: 'test-task',
+      attempt_id: 'test-attempt',
+      packet_digest: `sha256:${'0'.repeat(64)}`,
+      launch_plan_digest: `sha256:${'1'.repeat(64)}`,
+      payload_digest: payloadDigest,
+      protocol_version: '1',
+      schema_version: '1'
+    },
+    payload,
+    issued_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
     ...overrides
   }
 }
@@ -90,10 +87,7 @@ describe('issuer', () => {
     const request = createValidRequest()
     const tamperedRequest: ExecuteRequest = {
       ...request,
-      envelope: {
-        ...request.envelope,
-        binding: { ...request.envelope.binding, authority_id: 'unknown-authority' }
-      }
+      binding: { ...request.binding, authority_id: 'unknown-authority' }
     }
     expect(() => mintAuthorization(tamperedRequest)).toThrow(IssuerError)
     try {
@@ -107,7 +101,7 @@ describe('issuer', () => {
   test('負試験3: expires_at 期限切れ → EXPIRED_REQUEST', () => {
     const request = createValidRequest()
     const past = new Date(Date.now() - 60 * 1000) // 1分前
-    request.envelope.expires_at = past.toISOString()
+    request.expires_at = past.toISOString()
     expect(() => mintAuthorization(request)).toThrow(IssuerError)
     try {
       mintAuthorization(request)
@@ -121,12 +115,9 @@ describe('issuer', () => {
     const request = createValidRequest()
     const tamperedRequest: ExecuteRequest = {
       ...request,
-      envelope: {
-        ...request.envelope,
-        binding: {
-          ...request.envelope.binding,
-          payload_digest: `sha256:${'f'.repeat(64)}` // 不正な digest
-        }
+      binding: {
+        ...request.binding,
+        payload_digest: `sha256:${'f'.repeat(64)}` // 不正な digest
       }
     }
     expect(() => mintAuthorization(tamperedRequest)).toThrow(IssuerError)
@@ -140,7 +131,7 @@ describe('issuer', () => {
 
   test('負試験5: binding 欠落 → INVALID_BINDING', () => {
     const request = createValidRequest()
-    delete (request.envelope.binding as unknown as Record<string, unknown>).case_id
+    delete (request.binding as unknown as Record<string, unknown>).case_id
     expect(() => mintAuthorization(request)).toThrow(IssuerError)
     try {
       mintAuthorization(request)
@@ -167,7 +158,7 @@ describe('issuer', () => {
   test('負試験7: issued_at が未来すぎる（1分超）→ FUTURE_ISSUED_AT', () => {
     const request = createValidRequest()
     const future = new Date(Date.now() + 2 * 60 * 1000) // 2分後
-    request.envelope.issued_at = future.toISOString()
+    request.issued_at = future.toISOString()
     expect(() => mintAuthorization(request)).toThrow(IssuerError)
     try {
       mintAuthorization(request)
