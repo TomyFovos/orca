@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, afterEach, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
@@ -237,6 +237,54 @@ describe('managed execution endpoint authorization path', () => {
       expect(invalidJson.status).toBe(400)
       expect(invalidJson.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
     } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('logs the failed shape rule and layer without logging request values', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    const server = await startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const requestId = 'shape-observability-request'
+    const sensitivePayloadValue = 'must-not-appear-in-logs'
+
+    try {
+      const address = server!.address()
+      expect(address).not.toBeNull()
+      expect(typeof address).toBe('object')
+      const port = (address as AddressInfo).port
+
+      const unavailableRequestId = await postRawExecute(
+        port,
+        JSON.stringify({ envelope: null, operation_payload: null })
+      )
+      expect(unavailableRequestId.status).toBe(400)
+
+      const malformedOperationPayload = createSignedRequest(requestId)
+      const malformedRequest = {
+        ...malformedOperationPayload,
+        operation_payload: {
+          ...malformedOperationPayload.operation_payload,
+          case_id: { sensitivePayloadValue }
+        }
+      }
+      const knownRequestId = await postRawExecute(port, JSON.stringify(malformedRequest))
+      expect(knownRequestId.status).toBe(400)
+
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        1,
+        '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=envelope rule=record'
+      )
+      expect(errorSpy).toHaveBeenNthCalledWith(
+        2,
+        `[managed-execution] Malformed request: request_id=${requestId} layer=operation_payload field=case_id rule=string`
+      )
+      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain(sensitivePayloadValue)
+    } finally {
+      errorSpy.mockRestore()
       await closeServer(server!)
     }
   })
