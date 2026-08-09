@@ -1,1 +1,5 @@
 @AGENTS.md
+
+## 運用制約
+
+@ORCA_FORK_OPERATIONS.md
