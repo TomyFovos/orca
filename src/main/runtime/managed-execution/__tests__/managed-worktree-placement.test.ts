@@ -8,11 +8,15 @@ import {
   getWorktreeCreationLayout,
   getWorktreePathSettings
 } from '../../../ipc/worktree-logic'
+import type { RpcFailure } from '../../rpc/core'
+import { mapRuntimeError } from '../../rpc/errors'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 import {
   assertManagedWorktreePlacement,
   MANAGED_WORKTREE_ROOT_ENV,
   ManagedWorktreePlacementError,
+  type ManagedWorktreePlacementRejection,
+  type ManagedWorktreePlacementRejectionCode,
   resolveManagedWorktreeRoot
 } from '../managed-worktree-placement'
 
@@ -253,5 +257,127 @@ describe('検証できないホストは managed profile で fail-closed', () =>
     expect(() =>
       assertManagedWorktreePlacement('remote worktree creation', { hostUnvalidatable: true })
     ).not.toThrow()
+  })
+})
+
+describe('拒否理由は RPC 境界を越えて機械可読なまま届く', () => {
+  const runsAsRoot = process.getuid?.() === 0
+
+  beforeEach(() => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+  })
+
+  function rejectionThroughRpc(
+    options: Parameters<typeof assertManagedWorktreePlacement>[1],
+    env: NodeJS.ProcessEnv
+  ): RpcFailure['error'] {
+    let thrown: unknown
+    try {
+      assertManagedWorktreePlacement('local worktree creation', options, env)
+    } catch (error) {
+      thrown = error
+    }
+    expect(thrown).toBeInstanceOf(ManagedWorktreePlacementError)
+    return mapRuntimeError('req_1', { runtimeId: 'runtime-1' }, thrown).error
+  }
+
+  // 8 種すべてを列挙する。1 つでも構造化されずに落ちれば、拒否理由は message 文字列に
+  // 退化しており、呼び出し元は理由を機械的に区別できない。
+  type RejectionCase = {
+    code: ManagedWorktreePlacementRejectionCode
+    rule: string
+    skip?: boolean
+    build: () => { options?: { hostUnvalidatable?: boolean }; env: NodeJS.ProcessEnv }
+  }
+
+  const cases: RejectionCase[] = [
+    { code: 'unset', rule: 'required-in-managed-profile', build: () => ({ env: envWith() }) },
+    {
+      code: 'not_absolute',
+      rule: 'absolute-path',
+      build: () => ({ env: envWith('relative/workspaces') })
+    },
+    {
+      code: 'missing',
+      rule: 'exists',
+      build: () => ({ env: envWith(join(makeReachableBase(), 'absent')) })
+    },
+    {
+      code: 'not_a_directory',
+      rule: 'is-directory',
+      build: () => {
+        const file = join(makeReachableBase(), 'not-a-dir')
+        writeFileSync(file, '')
+        return { env: envWith(file) }
+      }
+    },
+    {
+      code: 'inside_home',
+      rule: 'outside-home',
+      build: () => {
+        const home = makeReachableBase()
+        const inside = join(home, 'workspaces')
+        mkdirSync(inside, { mode: 0o755 })
+        return { env: { [MANAGED_WORKTREE_ROOT_ENV]: inside, HOME: home } }
+      }
+    },
+    {
+      code: 'not_traversable',
+      rule: 'ancestors-world-traversable',
+      skip: !isPosix,
+      build: () => {
+        const base = makeReachableBase()
+        const root = join(base, 'workspaces')
+        mkdirSync(root, { mode: 0o755 })
+        chmodSync(base, 0o700)
+        return { env: envWith(root) }
+      }
+    },
+    {
+      code: 'not_writable_by_orca',
+      rule: 'writable-by-orca',
+      // root は全パーミッションを迂回するため、この拒否を再現できない。
+      skip: !isPosix || runsAsRoot,
+      build: () => {
+        const root = join(makeReachableBase(), 'workspaces')
+        mkdirSync(root, { mode: 0o555 })
+        return { env: envWith(root) }
+      }
+    },
+    {
+      code: 'host_unvalidatable',
+      rule: 'local-posix-host-only',
+      build: () => ({ options: { hostUnvalidatable: true }, env: envWith() })
+    }
+  ]
+
+  for (const testCase of cases) {
+    it.skipIf(testCase.skip)(`${testCase.code} を data として渡す`, () => {
+      const { options, env } = testCase.build()
+
+      const error = rejectionThroughRpc(options, env)
+
+      expect(error.code).toBe('managed_worktree_placement_unavailable')
+      expect(error.data).toMatchObject({ code: testCase.code, rule: testCase.rule })
+      expect((error.data as ManagedWorktreePlacementRejection).field).toBeTruthy()
+      expect((error.data as ManagedWorktreePlacementRejection).detail).toBeTruthy()
+    })
+  }
+
+  it('列挙が拒否コードの全種を覆っている', () => {
+    const covered = new Set(cases.map((testCase) => testCase.code))
+    const declared: readonly ManagedWorktreePlacementRejectionCode[] = [
+      'unset',
+      'not_absolute',
+      'inside_home',
+      'missing',
+      'not_a_directory',
+      'not_traversable',
+      'not_writable_by_orca',
+      'host_unvalidatable'
+    ]
+
+    expect([...covered].sort()).toEqual([...declared].sort())
   })
 })

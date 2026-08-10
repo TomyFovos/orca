@@ -21,14 +21,18 @@ export type ManagedWorktreePlacementRejection = Readonly<{
   detail: string
 }>
 
+export const MANAGED_WORKTREE_PLACEMENT_ERROR_CODE = 'managed_worktree_placement_unavailable'
+
 export class ManagedWorktreePlacementError extends Error {
-  readonly code = 'managed_worktree_placement_unavailable'
-  readonly rejection: ManagedWorktreePlacementRejection
+  readonly code = MANAGED_WORKTREE_PLACEMENT_ERROR_CODE
+  // Why: `data` is the name mapRuntimeError forwards to the caller. The reason has to survive
+  // the RPC boundary as a value — a message string the caller must parse is not a record.
+  readonly data: ManagedWorktreePlacementRejection
 
   constructor(rejection: ManagedWorktreePlacementRejection) {
     super(`Managed worktree placement rejected (${rejection.code}): ${rejection.detail}`)
     this.name = 'ManagedWorktreePlacementError'
-    this.rejection = rejection
+    this.data = rejection
   }
 }
 

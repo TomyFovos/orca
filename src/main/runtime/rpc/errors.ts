@@ -7,6 +7,7 @@ import { computerUseErrorRecoveryData } from '../../../shared/computer-use-error
 import { COMPUTER_ERROR_CODES } from '../../../shared/runtime-types'
 import { LINEAR_ERROR_CODES } from '../../../shared/linear-agent-access'
 import { AGENT_SESSION_RPC_ERROR_CODES } from '../../../shared/agent-session-host-authority'
+import { MANAGED_WORKTREE_PLACEMENT_ERROR_CODE } from '../managed-execution/managed-worktree-placement'
 
 export function successResponse(id: string, meta: RpcEnvelopeMeta, result: unknown): RpcSuccess {
   return {
@@ -92,6 +93,7 @@ const STRUCTURED_RUNTIME_PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
   'legacy_read_only',
   'orchestration_migration_required',
   'managed_execution_authorization_required',
+  MANAGED_WORKTREE_PLACEMENT_ERROR_CODE,
   'operation_unknown',
   'question_not_found',
   'answer_conflict',
