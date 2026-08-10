@@ -4,10 +4,13 @@ import { isWindowsAbsolutePathLike, resolveRuntimePath } from '../../shared/cros
 import { isWslUncPath } from '../../shared/wsl-paths'
 import { splitWorktreeId } from '../../shared/worktree-id'
 import { replaceKnownEmojiWithShortcodes } from '../../shared/emoji-shortcode-catalog'
+import { getRepoExecutionHostId, LOCAL_EXECUTION_HOST_ID } from '../../shared/execution-host'
+import { getManagedWorktreeRootOrNull } from '../runtime/managed-execution/managed-worktree-placement'
 import { getWslHome, parseWslPath } from '../wsl'
 
 type WorktreePathSettings = Pick<GlobalSettings, 'nestWorkspaces' | 'workspaceDir'>
-type WorktreeBasePathRepo = Pick<Repo, 'path' | 'worktreeBasePath'>
+type WorktreeBasePathRepo = Pick<Repo, 'path' | 'worktreeBasePath'> &
+  Partial<Pick<Repo, 'connectionId' | 'executionHostId'>>
 
 export {
   computeBranchName,
@@ -150,9 +153,12 @@ export function getWorktreePathSettings(
   repo: WorktreeBasePathRepo,
   settings: WorktreePathSettings
 ): WorktreePathSettings {
+  const managedRoot = getManagedWorktreeRootForRepo(repo)
   return {
-    nestWorkspaces: settings.nestWorkspaces,
-    workspaceDir: getEffectiveWorktreeBasePath(repo, settings)
+    // Why: one managed root is shared by every repo, so nesting by repo name is what keeps two
+    // repos with the same branch name from colliding on the same directory.
+    nestWorkspaces: managedRoot ? true : settings.nestWorkspaces,
+    workspaceDir: managedRoot ?? getEffectiveWorktreeBasePath(repo, settings)
   }
 }
 
@@ -160,10 +166,25 @@ export function getWorktreeCreationLayout(
   repo: WorktreeBasePathRepo,
   settings: WorktreePathSettings
 ): OrcaWorkspaceLayout {
+  const managedRoot = getManagedWorktreeRootForRepo(repo)
   return {
-    path: getEffectiveWorktreeBasePath(repo, settings),
-    nestWorkspaces: settings.nestWorkspaces
+    path: managedRoot ?? getEffectiveWorktreeBasePath(repo, settings),
+    nestWorkspaces: managedRoot ? true : settings.nestWorkspaces
   }
+}
+
+/**
+ * Whether managed placement can be validated for this repo. Only the local POSIX filesystem can
+ * be stat'd for traversability — SSH hosts and WSL distros are other machines/namespaces.
+ */
+export function isManagedWorktreePlacementHostLocal(repo: WorktreeBasePathRepo): boolean {
+  return getRepoExecutionHostId(repo) === LOCAL_EXECUTION_HOST_ID && !isWslUncPath(repo.path)
+}
+
+// Why: managed placement overrides both the global workspaceDir and the per-repo worktreeBasePath.
+// A per-repo override that escaped the managed root would put the worktree back out of reach.
+function getManagedWorktreeRootForRepo(repo: WorktreeBasePathRepo): string | null {
+  return isManagedWorktreePlacementHostLocal(repo) ? getManagedWorktreeRootOrNull() : null
 }
 
 export function hasRepoWorktreeBasePath(repo: Pick<Repo, 'worktreeBasePath'>): boolean {

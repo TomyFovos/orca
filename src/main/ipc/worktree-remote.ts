@@ -83,9 +83,11 @@ import {
   getWorktreeCreationLayout,
   getWorktreePathSettings,
   hasRepoWorktreeBasePath,
+  isManagedWorktreePlacementHostLocal,
   shouldSetDisplayName,
   mergeWorktree
 } from './worktree-logic'
+import { assertManagedWorktreePlacement } from '../runtime/managed-execution/managed-worktree-placement'
 import { findCreatedWorktree } from './created-worktree-reconciliation'
 import type { BranchPrefixSettings } from '../../shared/branch-prefix'
 import { getRepoIdFromWorktreeId } from '../../shared/worktree-id'
@@ -1550,6 +1552,9 @@ export async function createRemoteWorktree(
   const provider = requireSshGitProvider(repo.connectionId!)
   const fsProvider = getSshFilesystemProvider(repo.connectionId!)
 
+  assertManagedWorktreePlacement('remote worktree creation', {
+    hostUnvalidatable: !isManagedWorktreePlacementHostLocal(repo)
+  })
   const settings = store.getSettings()
   const worktreePathSettings = getWorktreePathSettings(repo, settings)
   let effectiveRequestedName = args.name
@@ -1957,6 +1962,9 @@ export async function createLocalWorktree(
   mainWindow: BrowserWindow,
   runtime?: OrcaRuntimeService
 ): Promise<CreateWorktreeResult> {
+  assertManagedWorktreePlacement('local worktree creation', {
+    hostUnvalidatable: !isManagedWorktreePlacementHostLocal(repo)
+  })
   const timing = createWorktreeCreateTimingRecorder()
   const settings = store.getSettings()
   const worktreePathSettings = getWorktreePathSettings(repo, settings)

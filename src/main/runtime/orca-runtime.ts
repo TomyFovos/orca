@@ -538,6 +538,7 @@ import {
   assertManagedExecutionAuthorized,
   propagateManagedRuntimeProfile
 } from './managed-execution/authorization'
+import { assertManagedWorktreePlacement } from './managed-execution/managed-worktree-placement'
 import {
   addClaudeTeammateModeAuto,
   addClaudeTeammateModeInProcess,
@@ -887,6 +888,7 @@ import {
   formatWorktreeRemovalError,
   getWorktreeCreationLayout,
   getWorktreePathSettings,
+  isManagedWorktreePlacementHostLocal,
   isOrphanCompatiblePreflightError,
   isOrphanedWorktreeError,
   mergeWorktree,
@@ -20862,6 +20864,9 @@ export class OrcaRuntimeService {
           : {})
       }
     }
+    assertManagedWorktreePlacement('runtime worktree creation', {
+      hostUnvalidatable: !isManagedWorktreePlacementHostLocal(repo)
+    })
     const settings = createSettings
     const worktreePathSettings = getWorktreePathSettings(repo, settings)
     const localGitExecOptions = getLocalProjectGitExecOptions(this.requireStore(), repo)
