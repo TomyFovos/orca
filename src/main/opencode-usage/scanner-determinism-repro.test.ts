@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, it } from 'vitest'
@@ -6,6 +6,15 @@ import Database from '../sqlite/sync-database'
 import { getProcessedDatabaseInfo, scanOpenCodeUsageDatabases } from './scanner'
 
 const WORKTREE = '/workspace/repo'
+
+function readSqliteChangeCounter(path: string): number {
+  return readFileSync(path).readUInt32BE(24)
+}
+
+function readFileTimes(path: string): { mtimeMs: number; ctimeMs: number } {
+  const fileStat = statSync(path)
+  return { mtimeMs: fileStat.mtimeMs, ctimeMs: fileStat.ctimeMs }
+}
 
 function createSessionTotalsSchema(db: Database.Database): void {
   db.exec(`
@@ -99,9 +108,20 @@ describe('scanner determinism measurements', () => {
     let previous = await scanOpenCodeUsageDatabases([], [])
     let sameMetadataCount = 0
     let staleTotalCount = 0
-    const observations: { iteration: number; before: object; after: object; total: number }[] = []
+    const observations: {
+      iteration: number
+      before: object
+      after: object
+      beforeTimes: object
+      afterTimes: object
+      beforeChangeCounter: number
+      afterChangeCounter: number
+      total: number
+    }[] = []
 
     for (let iteration = 1; iteration <= 200; iteration += 1) {
+      const beforeChangeCounter = readSqliteChangeCounter(canonicalPath)
+      const beforeTimes = readFileTimes(canonicalPath)
       const db = new Database(canonicalPath)
       insertSessionTotalsRow(db, `session-${iteration + 1}`, 200)
       db.close()
@@ -110,6 +130,8 @@ describe('scanner determinism measurements', () => {
         database.path.endsWith('opencode.db')
       )
       const after = await getProcessedDatabaseInfo(canonicalPath)
+      const afterTimes = readFileTimes(canonicalPath)
+      const afterChangeCounter = readSqliteChangeCounter(canonicalPath)
       const sameMetadata =
         previousCanonical?.mtimeMs === after.mtimeMs && previousCanonical.size === after.size
       const result = await scanOpenCodeUsageDatabases([], previous.processedDatabases)
@@ -126,6 +148,10 @@ describe('scanner determinism measurements', () => {
             iteration,
             before: { mtimeMs: previousCanonical?.mtimeMs, size: previousCanonical?.size },
             after,
+            beforeTimes,
+            afterTimes,
+            beforeChangeCounter,
+            afterChangeCounter,
             total
           })
         }
