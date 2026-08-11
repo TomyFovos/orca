@@ -1,7 +1,7 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, utimesSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, describe, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import Database from '../sqlite/sync-database'
 import { getProcessedDatabaseInfo, scanOpenCodeUsageDatabases } from './scanner'
 
@@ -9,11 +9,6 @@ const WORKTREE = '/workspace/repo'
 
 function readSqliteChangeCounter(path: string): number {
   return readFileSync(path).readUInt32BE(24)
-}
-
-function readFileTimes(path: string): { mtimeMs: number; ctimeMs: number } {
-  const fileStat = statSync(path)
-  return { mtimeMs: fileStat.mtimeMs, ctimeMs: fileStat.ctimeMs }
 }
 
 function createSessionTotalsSchema(db: Database.Database): void {
@@ -60,7 +55,7 @@ function insertSessionTotalsRow(
   )
 }
 
-describe('scanner determinism measurements', () => {
+describe('scanner cache invalidation', () => {
   let dataRoot: string
   let openCodeDir: string
   let previousXdgDataHome: string | undefined
@@ -101,74 +96,34 @@ describe('scanner determinism measurements', () => {
     return path
   }
 
-  it('records metadata collisions and the resulting cached total', async () => {
+  it('detects an in-place update when mtime and size are unchanged', async () => {
     const canonicalPath = writeSessionTotalsDb('opencode.db', [['session-1', 1000]])
-    writeSessionTotalsDb('opencode-backup.db', [['session-1', 400]])
+    const fixedTime = new Date('2025-01-01T00:00:00.000Z')
+    utimesSync(canonicalPath, fixedTime, fixedTime)
 
-    let previous = await scanOpenCodeUsageDatabases([], [])
-    let sameMetadataCount = 0
-    let staleTotalCount = 0
-    const observations: {
-      iteration: number
-      before: object
-      after: object
-      beforeTimes: object
-      afterTimes: object
-      beforeChangeCounter: number
-      afterChangeCounter: number
-      total: number
-    }[] = []
+    const first = await scanOpenCodeUsageDatabases([], [])
+    const firstCanonical = first.processedDatabases.find((database) =>
+      database.path.endsWith('opencode.db')
+    )
+    expect(firstCanonical).toBeDefined()
 
-    for (let iteration = 1; iteration <= 200; iteration += 1) {
-      const beforeChangeCounter = readSqliteChangeCounter(canonicalPath)
-      const beforeTimes = readFileTimes(canonicalPath)
-      const db = new Database(canonicalPath)
-      insertSessionTotalsRow(db, `session-${iteration + 1}`, 200)
-      db.close()
+    const db = new Database(canonicalPath)
+    insertSessionTotalsRow(db, 'session-2', 200)
+    db.close()
+    utimesSync(canonicalPath, fixedTime, fixedTime)
 
-      const previousCanonical = previous.processedDatabases.find((database) =>
-        database.path.endsWith('opencode.db')
-      )
-      const after = await getProcessedDatabaseInfo(canonicalPath)
-      const afterTimes = readFileTimes(canonicalPath)
-      const afterChangeCounter = readSqliteChangeCounter(canonicalPath)
-      const sameMetadata =
-        previousCanonical?.mtimeMs === after.mtimeMs && previousCanonical.size === after.size
-      const result = await scanOpenCodeUsageDatabases([], previous.processedDatabases)
-      const total = result.dailyAggregates.reduce(
-        (sum, aggregate) => sum + aggregate.inputTokens,
-        0
-      )
-      const expected = 1000 + iteration * 200
-      if (sameMetadata) {
-        sameMetadataCount += 1
-        if (total !== expected) {
-          staleTotalCount += 1
-          observations.push({
-            iteration,
-            before: { mtimeMs: previousCanonical?.mtimeMs, size: previousCanonical?.size },
-            after,
-            beforeTimes,
-            afterTimes,
-            beforeChangeCounter,
-            afterChangeCounter,
-            total
-          })
-        }
-      }
-      previous = result
-    }
+    const current = await getProcessedDatabaseInfo(canonicalPath)
+    expect(current.mtimeMs).toBe(firstCanonical?.mtimeMs)
+    expect(current.size).toBe(firstCanonical?.size)
+    expect(readSqliteChangeCounter(canonicalPath)).not.toBe(firstCanonical?.databaseChangeCounter)
 
-    console.log(
-      JSON.stringify({
-        sameMetadataCount,
-        staleTotalCount,
-        firstStaleObservation: observations[0] ?? null
-      })
+    const second = await scanOpenCodeUsageDatabases([], first.processedDatabases)
+    expect(second.dailyAggregates.reduce((sum, aggregate) => sum + aggregate.inputTokens, 0)).toBe(
+      1200
     )
   })
 
-  it('records the live WAL case while the writer remains open', async () => {
+  it('rescans while a live WAL contains uncheckpointed rows', async () => {
     const canonicalPath = join(openCodeDir, 'opencode.db')
     const writer = new Database(canonicalPath)
     createSessionTotalsSchema(writer)
@@ -180,25 +135,16 @@ describe('scanner determinism measurements', () => {
       const firstCanonical = first.processedDatabases.find((database) =>
         database.path.endsWith('opencode.db')
       )
+      expect(firstCanonical?.hasWalJournal).toBe(true)
       insertSessionTotalsRow(writer, 'session-2', 200)
       const second = await scanOpenCodeUsageDatabases([], first.processedDatabases)
-      const total = second.dailyAggregates.reduce(
-        (sum, aggregate) => sum + aggregate.inputTokens,
-        0
-      )
-      console.log(
-        JSON.stringify({
-          firstTotal: first.dailyAggregates.reduce(
-            (sum, aggregate) => sum + aggregate.inputTokens,
-            0
-          ),
-          secondTotal: total,
-          previousChangeCounter: firstCanonical?.databaseChangeCounter,
-          currentChangeCounter: second.processedDatabases.find((database) =>
-            database.path.endsWith('opencode.db')
-          )?.databaseChangeCounter
-        })
-      )
+      expect(
+        second.dailyAggregates.reduce((sum, aggregate) => sum + aggregate.inputTokens, 0)
+      ).toBe(1200)
+      expect(
+        second.processedDatabases.find((database) => database.path.endsWith('opencode.db'))
+          ?.hasWalJournal
+      ).toBe(true)
     } finally {
       writer.close()
     }
