@@ -80,6 +80,15 @@ ancestor from `/` downward that lacks `o+x`. There is no default to fall back
 to: creation fails closed. Loosening permissions is not an accepted remedy;
 relocate the root instead.
 
+On POSIX hosts, `o+x` is the deliberate reachability criterion, based only on
+traditional permission bits; Orca does not read POSIX ACLs. A root or ancestor
+made traversable for the worker solely by ACL entries, with its world execute
+bit cleared, is rejected as `not_traversable` even if the worker can reach it.
+For example, `drwxrwxr-x+` passes because `o+x` is set, not because an ACL is
+present. Correct ACL interpretation requires evaluating mask, effective, and
+default ACL semantics; the risk of incorrectly accepting an unreachable root
+outweighs the value of that check.
+
 Traversability is necessary but not sufficient. Orca cannot decide whether the
 worker's UID may write inside the root, because `fs.access` answers for the
 calling process only. That check belongs to whoever provisions the root.
