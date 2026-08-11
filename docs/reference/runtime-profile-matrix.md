@@ -60,6 +60,37 @@ The managed endpoint defaults to loopback port `6770` (override with
 RPC on `6768`; `6769` is reserved for the development WebSocket path and test
 fixtures rather than a managed listener.
 
+## Managed worktree placement
+
+In the managed profile every locally created worktree is placed under the root
+named by `ORCA_MANAGED_WORKTREE_ROOT`, overriding both the global `workspaceDir`
+setting and any per-repo `worktreeBasePath`. Repos are always nested by name
+below that root, because one root is shared by all of them.
+
+The reason the default placement cannot be reused: an isolated worker runs under
+a foreign UID (100000) and has to reach the worktree as its own cwd. A `$HOME`
+of mode 700 is not traversable by that UID, so any root inside `$HOME` is
+unreachable no matter where the agent binary lives.
+
+`src/main/runtime/managed-execution/managed-worktree-placement.ts` resolves the
+root once and rejects it — recording `code`, `field`, and `rule` on stderr —
+when it is unset, relative, missing, not a directory, inside `$HOME` (after
+`realpath`, so a symlink cannot slip past), not writable by Orca, or has any
+ancestor from `/` downward that lacks `o+x`. There is no default to fall back
+to: creation fails closed. Loosening permissions is not an accepted remedy;
+relocate the root instead.
+
+Traversability is necessary but not sufficient. Orca cannot decide whether the
+worker's UID may write inside the root, because `fs.access` answers for the
+calling process only. That check belongs to whoever provisions the root.
+
+Remote (SSH) and WSL worktree creation is refused in the managed profile
+(`host_unvalidatable`): the root would live on another host or namespace where
+none of these checks can run, and the existing fallback places the worktree
+beside the remote repo — that is, inside the remote `$HOME`.
+
+The `default` profile is unaffected in every one of these paths.
+
 ## Synchronous Bridge
 
 The renderer reads the profile **synchronously**. An asynchronous read would
