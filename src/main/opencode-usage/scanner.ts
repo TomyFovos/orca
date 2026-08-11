@@ -139,9 +139,15 @@ export async function getProcessedDatabaseInfo(
   dbPath: string
 ): Promise<OpenCodeUsageProcessedDatabase> {
   const dbStat = await stat(dbPath)
+  let hasWalJournal = false
+  try {
+    hasWalJournal = (await stat(`${dbPath}-wal`)).isFile()
+  } catch {
+    // Why: a WAL can disappear between scans after its frames are checkpointed.
+  }
   const header = Buffer.alloc(4)
   const database = await open(dbPath, 'r')
-  let databaseChangeCounter = -1
+  let databaseChangeCounter: number | undefined
   try {
     const { bytesRead } = await database.read(header, 0, header.length, 24)
     if (bytesRead === header.length) {
@@ -154,7 +160,8 @@ export async function getProcessedDatabaseInfo(
     path: dbPath,
     mtimeMs: dbStat.mtimeMs,
     size: dbStat.size,
-    databaseChangeCounter
+    databaseChangeCounter,
+    hasWalJournal
   }
 }
 
@@ -936,6 +943,8 @@ export async function scanOpenCodeUsageDatabases(
       previous.size === databaseInfo.size &&
       typeof previous.databaseChangeCounter === 'number' &&
       previous.databaseChangeCounter === databaseInfo.databaseChangeCounter &&
+      previous.hasWalJournal === false &&
+      databaseInfo.hasWalJournal === false &&
       Array.isArray(previous.ownedSessionIds) &&
       typeof previous.hasDeferredClaims === 'boolean'
     if (canReuse) {

@@ -4,6 +4,8 @@ export type OpenCodeUsageProcessedDatabase = {
   size: number
   /** SQLite's commit counter detects in-place writes when filesystem times and size do not change. */
   databaseChangeCounter?: number
+  /** A live WAL sidecar contains committed rows that are not reflected in the main file header. */
+  hasWalJournal?: boolean
 }
 
 export type OpenCodeUsageLocationBreakdown = {
