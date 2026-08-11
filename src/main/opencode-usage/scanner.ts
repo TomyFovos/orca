@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Why: OpenCode usage analytics need to normalize multiple local DB schema generations, attribute worktrees, and build persisted projections in one auditable pipeline. */
-import { readdir, realpath, stat } from 'node:fs/promises'
+import { open, readdir, realpath, stat } from 'node:fs/promises'
 import { basename, isAbsolute, join, posix, win32 } from 'node:path'
 import { yieldToEventLoop } from '../../shared/event-loop-yield'
 import type { Repo } from '../../shared/types'
@@ -139,10 +139,22 @@ export async function getProcessedDatabaseInfo(
   dbPath: string
 ): Promise<OpenCodeUsageProcessedDatabase> {
   const dbStat = await stat(dbPath)
+  const header = Buffer.alloc(4)
+  const database = await open(dbPath, 'r')
+  let databaseChangeCounter = -1
+  try {
+    const { bytesRead } = await database.read(header, 0, header.length, 24)
+    if (bytesRead === header.length) {
+      databaseChangeCounter = header.readUInt32BE(0)
+    }
+  } finally {
+    await database.close()
+  }
   return {
     path: dbPath,
     mtimeMs: dbStat.mtimeMs,
-    size: dbStat.size
+    size: dbStat.size,
+    databaseChangeCounter
   }
 }
 
@@ -922,6 +934,8 @@ export async function scanOpenCodeUsageDatabases(
       previous &&
       previous.mtimeMs === databaseInfo.mtimeMs &&
       previous.size === databaseInfo.size &&
+      typeof previous.databaseChangeCounter === 'number' &&
+      previous.databaseChangeCounter === databaseInfo.databaseChangeCounter &&
       Array.isArray(previous.ownedSessionIds) &&
       typeof previous.hasDeferredClaims === 'boolean'
     if (canReuse) {

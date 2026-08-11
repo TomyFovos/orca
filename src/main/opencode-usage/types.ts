@@ -2,6 +2,8 @@ export type OpenCodeUsageProcessedDatabase = {
   path: string
   mtimeMs: number
   size: number
+  /** SQLite's commit counter detects in-place writes when filesystem times and size do not change. */
+  databaseChangeCounter?: number
 }
 
 export type OpenCodeUsageLocationBreakdown = {
