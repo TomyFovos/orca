@@ -9,6 +9,7 @@ function readFixture(name: string): unknown {
 }
 
 function expectContractVersions(value: Record<string, unknown>): void {
+  // Compare booleans to keep fixture values out of assertion failure output.
   expect(value.protocol_version === EXECUTION_REQUEST_CONTRACT_VERSIONS.protocol_version).toBe(true)
   expect(value.schema_version === EXECUTION_REQUEST_CONTRACT_VERSIONS.schema_version).toBe(true)
 }
