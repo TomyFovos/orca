@@ -4,6 +4,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { verifyEd25519Signature } from '../crypto'
 import { canonicalBytes } from '../canonical'
+import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import type { SignedEnvelope } from '../issuer'
 
 type SignatureVector = {
@@ -55,8 +56,7 @@ describe('verifyEd25519Signature (実鍵テスト)', () => {
       packet_digest: 'sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
       launch_plan_digest: null,
       payload_digest: 'sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef',
-      protocol_version: 'ai-de-trusted-launcher/1',
-      schema_version: 'execution-envelope-1'
+      ...EXECUTION_REQUEST_CONTRACT_VERSIONS
     }
 
     const issuedAt = new Date().toISOString()

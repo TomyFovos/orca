@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, vi } from 'vitest'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from '../issuer'
 import { lookupAuthority } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
+import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import * as crypto from 'node:crypto'
 
 // モック
@@ -49,8 +50,7 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
       packet_digest: `sha256:${'0'.repeat(64)}`,
       launch_plan_digest: `sha256:${'1'.repeat(64)}`,
       payload_digest: payloadDigest,
-      protocol_version: '1',
-      schema_version: '1'
+      ...EXECUTION_REQUEST_CONTRACT_VERSIONS
     },
     payload,
     issued_at: now.toISOString(),

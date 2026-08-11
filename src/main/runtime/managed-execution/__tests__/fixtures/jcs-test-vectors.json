@@ -16,11 +16,11 @@
         "packet_digest": "sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
         "launch_plan_digest": null,
         "payload_digest": "sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        "protocol_version": "ai-de-trusted-launcher/1",
-        "schema_version": "execution-envelope-1"
+        "protocol_version": "ai-de.protocol/1",
+        "schema_version": "execution-request-1"
       },
-      "expected_canonical": "{\"attempt_id\":\"attempt-001\",\"authority_id\":\"test-authority\",\"case_id\":\"case-001\",\"launch_plan_digest\":null,\"operation\":\"start\",\"packet_digest\":\"sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\",\"payload_digest\":\"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\",\"protocol_version\":\"ai-de-trusted-launcher/1\",\"request_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"schema_version\":\"execution-envelope-1\",\"task_id\":\"task-001\"}",
-      "expected_sha256": "93ac89c8e35f40e79cc741709ebdc5be12e855631fbd20f4f6edb9d6460971ab"
+      "expected_canonical": "{\"attempt_id\":\"attempt-001\",\"authority_id\":\"test-authority\",\"case_id\":\"case-001\",\"launch_plan_digest\":null,\"operation\":\"start\",\"packet_digest\":\"sha256:abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890\",\"payload_digest\":\"sha256:1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef\",\"protocol_version\":\"ai-de.protocol/1\",\"request_id\":\"550e8400-e29b-41d4-a716-446655440000\",\"schema_version\":\"execution-request-1\",\"task_id\":\"task-001\"}",
+      "expected_sha256": "9f85bdb3bb66264e98cb3e9c262eb47bd74dc720b8f4680dc8b58a38873d0a1c"
     },
     {
       "index": 2,
