@@ -167,4 +167,40 @@ describe('scanner determinism measurements', () => {
       })
     )
   })
+
+  it('records the live WAL case while the writer remains open', async () => {
+    const canonicalPath = join(openCodeDir, 'opencode.db')
+    const writer = new Database(canonicalPath)
+    createSessionTotalsSchema(writer)
+    writer.pragma('journal_mode = WAL')
+    insertSessionTotalsRow(writer, 'session-1', 1000)
+
+    try {
+      const first = await scanOpenCodeUsageDatabases([], [])
+      const firstCanonical = first.processedDatabases.find((database) =>
+        database.path.endsWith('opencode.db')
+      )
+      insertSessionTotalsRow(writer, 'session-2', 200)
+      const second = await scanOpenCodeUsageDatabases([], first.processedDatabases)
+      const total = second.dailyAggregates.reduce(
+        (sum, aggregate) => sum + aggregate.inputTokens,
+        0
+      )
+      console.log(
+        JSON.stringify({
+          firstTotal: first.dailyAggregates.reduce(
+            (sum, aggregate) => sum + aggregate.inputTokens,
+            0
+          ),
+          secondTotal: total,
+          previousChangeCounter: firstCanonical?.databaseChangeCounter,
+          currentChangeCounter: second.processedDatabases.find((database) =>
+            database.path.endsWith('opencode.db')
+          )?.databaseChangeCounter
+        })
+      )
+    } finally {
+      writer.close()
+    }
+  })
 })
