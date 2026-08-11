@@ -9,6 +9,7 @@ import * as path from 'node:path'
 import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
+import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 
@@ -54,8 +55,7 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
     launch_plan_digest: null,
     operation: 'start',
     payload_digest: sha256Canonical(payload),
-    protocol_version: 'ai-de-trusted-launcher/1',
-    schema_version: 'execution-envelope-1'
+    ...EXECUTION_REQUEST_CONTRACT_VERSIONS
   }
   const signature = sign(
     null,

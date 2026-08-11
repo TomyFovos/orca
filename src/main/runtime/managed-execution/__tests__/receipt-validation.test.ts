@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
+import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import { validateReceiptWithAiDe } from './ai-de-receipt-validator'
 const OUTPUT_DIR = path.join(__dirname, 'test-receipts')
 
@@ -17,7 +18,8 @@ describe('Orca receipt validation with AI-DE validator', () => {
       case_id: 'case-001',
       task_id: 'task-001',
       attempt_id: 'attempt-001',
-      protocol_version: 'ai-de-trusted-launcher/1',
+      protocol_version: EXECUTION_REQUEST_CONTRACT_VERSIONS.protocol_version,
+      // 規範的根拠が未確定のため、現行値を据え置く。
       schema_version: 'execution-envelope-1',
       outcome: 'accepted',
       backend_kind: 'orca',
@@ -42,7 +44,8 @@ describe('Orca receipt validation with AI-DE validator', () => {
       case_id: 'case-001',
       task_id: 'task-001',
       attempt_id: 'attempt-001',
-      protocol_version: 'ai-de-trusted-launcher/1',
+      protocol_version: EXECUTION_REQUEST_CONTRACT_VERSIONS.protocol_version,
+      // 規範的根拠が未確定のため、現行値を据え置く。
       schema_version: 'execution-envelope-1',
       outcome: 'replayed',
       backend_kind: 'orca',
@@ -67,7 +70,8 @@ describe('Orca receipt validation with AI-DE validator', () => {
       case_id: 'case-001',
       task_id: 'task-001',
       attempt_id: 'attempt-001',
-      protocol_version: 'ai-de-trusted-launcher/1',
+      protocol_version: EXECUTION_REQUEST_CONTRACT_VERSIONS.protocol_version,
+      // 規範的根拠が未確定のため、現行値を据え置く。
       schema_version: 'execution-envelope-1',
       outcome: 'rejected',
       reject_reason: 'INVALID_SIGNATURE',
