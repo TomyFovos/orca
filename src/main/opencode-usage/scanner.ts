@@ -943,6 +943,7 @@ export async function scanOpenCodeUsageDatabases(
       previous.size === databaseInfo.size &&
       typeof previous.databaseChangeCounter === 'number' &&
       previous.databaseChangeCounter === databaseInfo.databaseChangeCounter &&
+      // Why: live WAL frames can contain committed rows absent from the main database file.
       previous.hasWalJournal === false &&
       databaseInfo.hasWalJournal === false &&
       Array.isArray(previous.ownedSessionIds) &&
