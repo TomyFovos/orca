@@ -9,7 +9,10 @@ import * as path from 'node:path'
 import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
-import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
+import {
+  EXECUTION_REQUEST_CONTRACT_VERSIONS,
+  type ExecutionOperation
+} from '../execution-request-contract'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 
@@ -37,23 +40,36 @@ function sha256Canonical(value: unknown): string {
 }
 
 function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = ''): ExecuteRequest {
+  return createSignedOperationRequest(
+    'start',
+    {
+      adapter: 'codex',
+      model: { adapter: 'codex', concrete_model_id: 'gpt-5' },
+      write_permission: 'workspace-write',
+      prompt: payloadSuffix
+    },
+    `sha256:${'0'.repeat(64)}`,
+    requestId
+  )
+}
+
+function createSignedOperationRequest(
+  operation: ExecutionOperation,
+  payload: Record<string, unknown>,
+  launchPlanDigest: string | null,
+  requestId: string = randomUUID()
+): ExecuteRequest {
   const issuedAt = new Date()
   const expiresAt = new Date(issuedAt.getTime() + 60_000)
-  const payload = {
-    case_id: `managed-e2e-case${payloadSuffix}`,
-    task_id: `managed-e2e-task${payloadSuffix}`,
-    attempt_id: `managed-e2e-attempt${payloadSuffix}`,
-    packet_digest: `sha256:${'0'.repeat(64)}`
-  }
   const binding = {
     authority_id: 'managed-e2e-authority',
     request_id: requestId,
-    case_id: payload.case_id,
-    task_id: payload.task_id,
-    attempt_id: payload.attempt_id,
-    packet_digest: payload.packet_digest,
-    launch_plan_digest: null,
-    operation: 'start',
+    case_id: 'managed-e2e-case',
+    task_id: 'managed-e2e-task',
+    attempt_id: 'managed-e2e-attempt',
+    packet_digest: `sha256:${'0'.repeat(64)}`,
+    launch_plan_digest: launchPlanDigest,
+    operation,
     payload_digest: sha256Canonical(payload),
     ...EXECUTION_REQUEST_CONTRACT_VERSIONS
   }
@@ -298,7 +314,7 @@ describe('managed execution endpoint authorization path', () => {
       port: 0,
       onProtectedEffect: (payload) => {
         protectedEffectCalls += 1
-        expect(payload).toMatchObject({ case_id: 'managed-e2e-case' })
+        expect(payload).toMatchObject({ adapter: 'codex' })
       }
     })
     expect(server).not.toBeNull()
@@ -330,6 +346,118 @@ describe('managed execution endpoint authorization path', () => {
       expect(errorSpy).toHaveBeenCalledWith(
         `[managed-execution] Request rejected: request_id=${substitutedRequest.binding.request_id} code=PAYLOAD_DIGEST_MISMATCH layer=binding field=payload_digest rule=matches-envelope-payload`
       )
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('executes every contract-compliant operation payload through the endpoint', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const requests = [
+        createSignedOperationRequest('prepare', { adapter: 'codex' }, null),
+        createSignedRequest(),
+        createSignedOperationRequest(
+          'stop',
+          { mode: 'graceful', reason_code: 'USER_REQUESTED' },
+          `sha256:${'1'.repeat(64)}`
+        ),
+        createSignedOperationRequest(
+          'cleanup',
+          { verification_digest: `sha256:${'2'.repeat(64)}` },
+          null
+        )
+      ]
+
+      for (const request of requests) {
+        const response = await postExecute(port, request)
+        expect(response.status).toBe(200)
+        expect(response.receipt).toMatchObject({ outcome: 'accepted' })
+      }
+      expect(protectedEffectCalls).toBe(requests.length)
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects every operation payload contract violation before the protected effect', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const cases = [
+        {
+          request: createSignedOperationRequest('prepare', {}, null),
+          field: 'operation_payload.adapter',
+          rule: 'required'
+        },
+        {
+          request: createSignedOperationRequest(
+            'start',
+            {
+              adapter: 'codex',
+              model: { adapter: 'codex', concrete_model_id: 'gpt-5' },
+              write_permission: 'workspace-write'
+            },
+            `sha256:${'3'.repeat(64)}`
+          ),
+          field: 'operation_payload.prompt',
+          rule: 'required'
+        },
+        {
+          request: createSignedOperationRequest(
+            'stop',
+            { mode: 'immediate' },
+            `sha256:${'4'.repeat(64)}`
+          ),
+          field: 'operation_payload.mode',
+          rule: 'enum'
+        },
+        {
+          request: createSignedOperationRequest(
+            'cleanup',
+            { verification_digest: `sha256:${'5'.repeat(64)}`, extra: true },
+            null
+          ),
+          field: 'operation_payload.extra',
+          rule: 'unexpected'
+        }
+      ]
+
+      for (const testCase of cases) {
+        const response = await postExecute(port, testCase.request)
+        expect(response.status).toBe(400)
+        expect(response.receipt).toMatchObject({
+          outcome: 'rejected',
+          reject_reason: 'INVALID_OPERATION_PAYLOAD'
+        })
+        expect(errorSpy).toHaveBeenCalledWith(
+          `[managed-execution] Request rejected: request_id=${testCase.request.binding.request_id} code=INVALID_OPERATION_PAYLOAD layer=payload field=${testCase.field} rule=${testCase.rule}`
+        )
+      }
+      expect(protectedEffectCalls).toBe(0)
     } finally {
       errorSpy.mockRestore()
       await closeServer(server!)

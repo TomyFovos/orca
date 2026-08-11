@@ -24,10 +24,10 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
   const expiresAt = new Date(now.getTime() + 60 * 1000) // 1分後
 
   const payload = {
-    case_id: 'test-case',
-    task_id: 'test-task',
-    attempt_id: 'test-attempt',
-    packet_digest: `sha256:${'0'.repeat(64)}`
+    adapter: 'codex',
+    model: { adapter: 'codex', concrete_model_id: 'gpt-5' },
+    write_permission: 'workspace-write',
+    prompt: ''
   }
 
   const payloadBytes = canonicalBytes(payload)
@@ -42,7 +42,7 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
     },
     binding: {
       authority_id: 'test-authority',
-      operation: 'prepare',
+      operation: 'start',
       request_id: `test-request-${Math.random()}`,
       case_id: 'test-case',
       task_id: 'test-task',

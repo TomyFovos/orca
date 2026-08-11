@@ -71,32 +71,36 @@ describe('AI-DE 共有署名ベクタの endpoint 経路', () => {
     setProcessRuntimeProfile('default')
   })
 
-  it('ベクタの envelope を無改変で受理し、shape 検査も署名検証も通す', async () => {
-    const server = await startManagedExecutionEndpoint({ port: 0 })
+  it('署名が正しい共有ベクタでも規範外 operation payload を effect 前に拒否する', async () => {
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
     expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       const port = (server!.address() as AddressInfo).port
       const response = await postEnvelope(port, JSON.stringify(vector.envelope))
 
-      // 形状の拒否でも署名の拒否でもないことを、まず個別に示す。
       expect(response.body).not.toMatchObject({ error: { code: 'MALFORMED_REQUEST' } })
       expect(response.body).not.toMatchObject({ reject_reason: 'INVALID_SIGNATURE' })
       expect(response.body).not.toMatchObject({ reject_reason: 'PAYLOAD_DIGEST_MISMATCH' })
-
-      expect(response.status).toBe(200)
+      expect(response.status).toBe(400)
       expect(response.body).toMatchObject({
         schema: 'ai-de.execution-receipt/1',
-        outcome: 'accepted',
-        request_id: vector.envelope.binding.request_id,
-        operation: vector.envelope.binding.operation,
-        case_id: vector.envelope.binding.case_id,
-        task_id: vector.envelope.binding.task_id,
-        attempt_id: vector.envelope.binding.attempt_id,
-        protocol_version: vector.envelope.binding.protocol_version,
-        schema_version: vector.envelope.binding.schema_version
+        outcome: 'rejected',
+        reject_reason: 'INVALID_OPERATION_PAYLOAD'
       })
+      expect(protectedEffectCalls).toBe(0)
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${vector.envelope.binding.request_id} code=INVALID_OPERATION_PAYLOAD layer=payload field=operation_payload.adapter rule=required`
+      )
     } finally {
+      errorSpy.mockRestore()
       await closeServer(server!)
     }
   })

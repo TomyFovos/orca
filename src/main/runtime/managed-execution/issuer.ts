@@ -7,6 +7,7 @@ import {
 } from './authorization'
 import { createHash } from 'node:crypto'
 import { canonicalBytes } from './canonical'
+import { findOperationPayloadContractViolation } from './execution-request-contract'
 
 const MAX_EXPIRY_DURATION_MS = 5 * 60 * 1000 // 5分
 const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
@@ -46,6 +47,7 @@ export enum IssuerErrorCode {
   REPLAY_ATTACK = 'REPLAY_ATTACK',
   REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD = 'REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD',
   UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
+  INVALID_OPERATION_PAYLOAD = 'INVALID_OPERATION_PAYLOAD',
   MALFORMED_REQUEST = 'MALFORMED_REQUEST'
 }
 
@@ -145,6 +147,25 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
         layer: 'binding',
         field: 'operation',
         rule: 'supported-operation'
+      }
+    )
+  }
+
+  // Agents may bypass their own approval and sandbox controls, so Orca verifies
+  // operation-specific effect inputs before minting an executable capability.
+  const operationPayloadViolation = findOperationPayloadContractViolation(
+    envelope.binding.operation,
+    envelope.binding.launch_plan_digest,
+    envelope.payload
+  )
+  if (operationPayloadViolation) {
+    throw new IssuerError(
+      IssuerErrorCode.INVALID_OPERATION_PAYLOAD,
+      'operation payload violates the execution request contract',
+      {
+        layer: 'payload',
+        field: operationPayloadViolation.field,
+        rule: operationPayloadViolation.rule
       }
     )
   }
