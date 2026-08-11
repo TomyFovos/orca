@@ -27,4 +27,12 @@ describe('managed execution request contract versions', () => {
       EXECUTION_REQUEST_CONTRACT_VERSIONS
     )
   })
+
+  it('JCS binding ベクタも同じ契約値を使う', () => {
+    const fixture = readFixture('jcs-test-vectors.json') as {
+      vectors: Array<{ input: Record<string, unknown> }>
+    }
+
+    expect(contractVersions(fixture.vectors[0].input)).toEqual(EXECUTION_REQUEST_CONTRACT_VERSIONS)
+  })
 })
