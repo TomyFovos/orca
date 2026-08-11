@@ -16,7 +16,7 @@ function expectContractVersions(value: Record<string, unknown>): void {
 describe('managed execution request contract versions', () => {
   it('AI-DE 共有署名ベクタの binding と一致する', () => {
     const fixture = readFixture('execution-envelope-signature-test-vectors.json') as {
-      vectors: Array<{ envelope: { binding: Record<string, unknown> } }>
+      vectors: { envelope: { binding: Record<string, unknown> } }[]
     }
 
     expectContractVersions(fixture.vectors[0].envelope.binding)
@@ -24,7 +24,7 @@ describe('managed execution request contract versions', () => {
 
   it('JCS binding ベクタも同じ契約値を使う', () => {
     const fixture = readFixture('jcs-test-vectors.json') as {
-      vectors: Array<{ input: Record<string, unknown> }>
+      vectors: { input: Record<string, unknown> }[]
     }
 
     expectContractVersions(fixture.vectors[0].input)
