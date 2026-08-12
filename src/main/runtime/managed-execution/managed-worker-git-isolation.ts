@@ -1,5 +1,6 @@
-import { readFileSync, realpathSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { realpathSync, statSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runtime-profile'
 
 export type ManagedWorkerGitIsolationRejection = Readonly<{
@@ -56,89 +57,72 @@ function findNonTraversableAncestor(path: string): string | undefined {
   }
 }
 
-function resolveLinkedGitdir(gitFile: string): string {
-  const content = readFileSync(gitFile, 'utf8')
-  const match = /^gitdir:\s*(.+?)\s*$/m.exec(content)
-  if (!match?.[1]) {
-    reject(
-      'git_metadata_unresolvable',
-      gitFile,
-      'linked-gitdir-pointer',
-      'the .git file is not a gitdir pointer'
-    )
+function gitDiscoveryEnvironment(): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {}
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('GIT_')) {
+      environment[key] = value
+    }
   }
-  const target = match[1]
-  return realpathSync(isAbsolute(target) ? target : resolve(dirname(gitFile), target))
+  // Why: a caller-controlled Git environment can redirect discovery away from the worker workspace.
+  return { ...environment, LC_ALL: 'C', LANG: 'C' }
 }
 
-function resolveCommonGitdir(gitdir: string): string {
-  const commonDirFile = resolve(gitdir, 'commondir')
-  const target = readFileSync(commonDirFile, 'utf8').trim()
-  if (!target) {
-    reject(
-      'git_metadata_unresolvable',
-      commonDirFile,
-      'linked-common-dir-pointer',
-      'the linked gitdir has no common-dir pointer'
-    )
-  }
-  const commonDir = realpathSync(
-    isAbsolute(target) ? target : resolve(dirname(commonDirFile), target)
-  )
-  if (!statSync(commonDir).isDirectory()) {
-    reject(
-      'git_metadata_unresolvable',
-      commonDir,
-      'linked-common-dir-directory',
-      'the linked common dir is not a directory'
-    )
-  }
-  return commonDir
+function isNotGitRepository(error: unknown): boolean {
+  const gitError = error as NodeJS.ErrnoException & { status?: number; stderr?: string | Buffer }
+  const stderr = typeof gitError.stderr === 'string' ? gitError.stderr : gitError.stderr?.toString()
+  return gitError.status === 128 && stderr?.includes('not a git repository') === true
 }
 
 function resolveGitMetadataPaths(worktreePath: string): string[] {
-  const gitPath = resolve(worktreePath, '.git')
-  let gitStat: ReturnType<typeof statSync>
+  let output: string
   try {
-    gitStat = statSync(gitPath)
+    output = execFileSync('git', ['-C', worktreePath, 'rev-parse', '--git-common-dir'], {
+      encoding: 'utf8',
+      env: gitDiscoveryEnvironment(),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: 15_000
+    })
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isNotGitRepository(error)) {
       return []
     }
     reject(
       'git_metadata_unresolvable',
-      gitPath,
-      'git-metadata-stat',
-      'the .git path could not be inspected'
+      worktreePath,
+      'git-repository-discovery',
+      'Git could not resolve the repository metadata for this workspace'
     )
   }
-  if (gitStat.isDirectory()) {
-    return [realpathSync(gitPath)]
+  const lines = output.split('\n')
+  if (lines.at(-1) === '') {
+    lines.pop()
   }
-  if (!gitStat.isFile()) {
+  const commonDirPath = lines.length === 1 ? lines[0]?.replace(/\r$/, '') : undefined
+  if (!commonDirPath) {
     reject(
       'git_metadata_unresolvable',
-      gitPath,
-      'git-metadata-kind',
-      'the .git path is neither a file nor a directory'
+      worktreePath,
+      'git-repository-discovery-output',
+      'Git returned an uninterpretable common metadata directory'
     )
   }
-  const gitdir = resolveLinkedGitdir(gitPath)
-  if (!statSync(gitdir).isDirectory()) {
+  const commonDir = realpathSync(resolve(worktreePath, commonDirPath))
+  if (!statSync(commonDir).isDirectory()) {
     reject(
       'git_metadata_unresolvable',
-      gitdir,
-      'linked-gitdir-directory',
-      'the linked gitdir is not a directory'
+      commonDir,
+      'git-common-dir-directory',
+      'Git resolved common metadata that is not a directory'
     )
   }
   // Why: linked worktrees share this common dir, so an agent bypassing its own sandbox could rewrite every worktree's refs.
-  return [gitdir, resolveCommonGitdir(gitdir)]
+  return [commonDir]
 }
 
 /**
  * Refuse to hand a managed worker a workspace when the foreign UID can traverse to Git metadata.
- * A folder workspace has no .git metadata, but malformed metadata is rejected because isolation cannot be established.
+ * A folder workspace has no discovered repository; discovery failures are rejected because isolation cannot be established.
  */
 export function assertManagedWorkerGitIsolated(
   worktreePath: string,
@@ -163,6 +147,7 @@ export function assertManagedWorkerGitIsolated(
       'Git metadata isolation cannot be validated on a remote host'
     )
   }
+  // Why: agents can bypass their own approvals and sandbox, so Orca must enforce metadata isolation before spawn.
   let metadataPaths: string[]
   try {
     metadataPaths = resolveGitMetadataPaths(worktreePath)
@@ -172,9 +157,9 @@ export function assertManagedWorkerGitIsolated(
     }
     reject(
       'git_metadata_unresolvable',
-      resolve(worktreePath, '.git'),
+      worktreePath,
       'git-metadata-resolvable',
-      'the .git metadata path could not be resolved'
+      'Git metadata could not be resolved'
     )
   }
   for (const metadataPath of metadataPaths) {
