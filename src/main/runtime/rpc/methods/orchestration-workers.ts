@@ -4,6 +4,7 @@ import {
   assertManagedExecutionAuthorized,
   MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
 } from '../../managed-execution/authorization'
+import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
@@ -99,6 +100,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       const coordinatorWorktree = await runtime.showManagedWorktree(
         `id:${coordinatorTerminal.worktreeId}`
       )
+      const workerRepo = await runtime.showRepo(params.repo ?? coordinatorWorktree.repoId)
       if (createsWorktree) {
         await assertOrchestrationWorktreeCreationSupported({
           runtime,
@@ -111,6 +113,16 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         : requestedWorktree === 'current'
           ? coordinatorWorktree
           : await runtime.showManagedWorktree(requestedWorktree)
+      if (createsWorktree) {
+        assertManagedWorkerGitIsolated(workerRepo.path, {
+          hostUnvalidatable: Boolean(workerRepo.connectionId)
+        })
+      } else if (resolvedWorktree) {
+        const resolvedRepo = await runtime.showRepo(resolvedWorktree.repoId)
+        assertManagedWorkerGitIsolated(resolvedWorktree.git.path, {
+          hostUnvalidatable: Boolean(resolvedRepo.connectionId)
+        })
+      }
       let explicitTerminal
       if (params.terminal) {
         explicitTerminal = await runtime.showTerminal(params.terminal)

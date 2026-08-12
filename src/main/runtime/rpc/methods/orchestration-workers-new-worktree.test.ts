@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../orca-runtime'
@@ -6,6 +9,11 @@ import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
+import { setProcessRuntimeProfile } from '../../runtime-profile'
+
+vi.mock('../../managed-execution/authorization', () => ({
+  assertManagedExecutionAuthorized: () => undefined
+}))
 
 describe('orchestration new-worktree workers', () => {
   type CreateWorktreeResult = Awaited<ReturnType<OrcaRuntimeService['createManagedWorktree']>>
@@ -71,7 +79,10 @@ describe('orchestration new-worktree workers', () => {
     })
   })
 
-  afterEach(() => db.close())
+  afterEach(() => {
+    setProcessRuntimeProfile('default')
+    db.close()
+  })
 
   async function startWorker(overrides: Record<string, unknown> = {}) {
     const task = db.createTask({ spec: 'new-worktree task', runId })
@@ -155,6 +166,43 @@ describe('orchestration new-worktree workers', () => {
       ])
     )
     expect(runtime.createTerminal).not.toHaveBeenCalled()
+  })
+
+  it('rejects a reachable linked gitdir before creating the worker terminal', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'orca-worker-start-git-'))
+    chmodSync(base, 0o755)
+    const commonDir = join(base, 'repository.git')
+    const gitdir = join(commonDir, 'worktrees', 'worker')
+    const worktreePath = join(base, 'worktree')
+    mkdirSync(gitdir, { recursive: true, mode: 0o755 })
+    mkdirSync(worktreePath, { mode: 0o755 })
+    writeFileSync(join(gitdir, 'commondir'), '../..\n')
+    writeFileSync(join(worktreePath, '.git'), `gitdir: ${gitdir}\n`)
+    setProcessRuntimeProfile('managed')
+    vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
+      id: 'repo::worker',
+      repoId: 'repo',
+      git: { path: worktreePath }
+    } as never)
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo',
+      kind: 'git',
+      path: worktreePath
+    } as never)
+
+    try {
+      await expect(startWorker({ worktree: 'current' })).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          layer: 'managed_worker_git_isolation',
+          field: expect.stringContaining(commonDir),
+          rule: 'ancestors-not-world-traversable'
+        }
+      })
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 
   it('rejects a new worktree for a folder project before creating effects', async () => {
