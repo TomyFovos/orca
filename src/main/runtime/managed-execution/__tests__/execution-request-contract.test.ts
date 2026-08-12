@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import {
   EXECUTION_REQUEST_CONTRACT_VERSIONS,
   EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT,
+  EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS,
   type ExecutionOperation
 } from '../execution-request-contract'
 
@@ -65,6 +66,11 @@ describe('managed execution request contract versions', () => {
       ).toBe(true)
       expect(matchesPayloadContract(properties.operation_payload, contract.payload)).toBe(true)
     }
+  })
+
+  it('request root required fields match the AI-DE execution request schema', () => {
+    const schema = JSON.parse(fs.readFileSync(AI_DE_EXECUTION_REQUEST_SCHEMA, 'utf8')) as JsonRecord
+    expect(sameStringArray(schema.required, EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS)).toBe(true)
   })
 })
 

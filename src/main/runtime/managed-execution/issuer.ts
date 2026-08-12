@@ -155,7 +155,6 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
   // operation-specific effect inputs before minting an executable capability.
   const operationPayloadViolation = findOperationPayloadContractViolation(
     envelope.binding.operation,
-    envelope.binding.launch_plan_digest,
     envelope.payload
   )
   if (operationPayloadViolation) {

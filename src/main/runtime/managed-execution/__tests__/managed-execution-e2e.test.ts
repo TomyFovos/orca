@@ -55,12 +55,26 @@ function createSignedRequest(requestId: string = randomUUID(), payloadSuffix = '
 
 function createSignedOperationRequest(
   operation: ExecutionOperation,
-  payload: Record<string, unknown>,
+  operationPayload: Record<string, unknown>,
   launchPlanDigest: string | null,
   requestId: string = randomUUID()
 ): ExecuteRequest {
   const issuedAt = new Date()
   const expiresAt = new Date(issuedAt.getTime() + 60_000)
+  const payload = {
+    schema: 'ai-de.execution-request/1',
+    operation,
+    request_id: requestId,
+    case_id: 'managed-e2e-case',
+    task_id: 'managed-e2e-task',
+    attempt_id: 'managed-e2e-attempt',
+    packet_digest: `sha256:${'0'.repeat(64)}`,
+    launch_plan_digest: launchPlanDigest,
+    ...EXECUTION_REQUEST_CONTRACT_VERSIONS,
+    issued_at: issuedAt.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    operation_payload: operationPayload
+  }
   const binding = {
     authority_id: 'managed-e2e-authority',
     request_id: requestId,
@@ -314,7 +328,7 @@ describe('managed execution endpoint authorization path', () => {
       port: 0,
       onProtectedEffect: (payload) => {
         protectedEffectCalls += 1
-        expect(payload).toMatchObject({ adapter: 'codex' })
+        expect(payload.operation_payload).toMatchObject({ adapter: 'codex' })
       }
     })
     expect(server).not.toBeNull()

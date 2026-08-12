@@ -33,6 +33,21 @@ export type OperationPayloadContractViolation = Readonly<{
 
 const SHA256_PATTERN = '^sha256:[0-9a-f]{64}$'
 
+export const EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS = [
+  'schema',
+  'operation',
+  'request_id',
+  'case_id',
+  'task_id',
+  'attempt_id',
+  'packet_digest',
+  'protocol_version',
+  'schema_version',
+  'issued_at',
+  'expires_at',
+  'operation_payload'
+] as const
+
 export const EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT: Readonly<
   Record<ExecutionOperation, OperationPayloadContract>
 > = {
@@ -103,23 +118,34 @@ export const EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT: Readonly<
 
 export function findOperationPayloadContractViolation(
   operation: string,
-  launchPlanDigest: unknown,
   payload: unknown
 ): OperationPayloadContractViolation | null {
+  if (!isRecord(payload)) {
+    return { field: 'request', rule: 'record' }
+  }
+  for (const requiredField of EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS) {
+    if (!(requiredField in payload)) {
+      return { field: requiredField, rule: 'required' }
+    }
+  }
   if (!isExecutionOperation(operation)) {
     return null
   }
 
   const contract = EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT[operation]
   const launchPlanDigestViolation = findLaunchPlanDigestViolation(
-    launchPlanDigest,
+    payload.launch_plan_digest,
     contract.launchPlanDigest
   )
   if (launchPlanDigestViolation) {
     return { field: 'launch_plan_digest', rule: launchPlanDigestViolation }
   }
 
-  return findPayloadFieldViolation(payload, contract.payload, 'operation_payload')
+  return findPayloadFieldViolation(
+    payload.operation_payload,
+    contract.payload,
+    'operation_payload'
+  )
 }
 
 function isExecutionOperation(value: string): value is ExecutionOperation {

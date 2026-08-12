@@ -22,12 +22,27 @@ const mockVerifySignature = vi.mocked(verifyEd25519Signature)
 function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest {
   const now = new Date()
   const expiresAt = new Date(now.getTime() + 60 * 1000) // 1分後
+  const requestId = `test-request-${Math.random()}`
+  const launchPlanDigest = `sha256:${'1'.repeat(64)}`
 
   const payload = {
-    adapter: 'codex',
-    model: { adapter: 'codex', concrete_model_id: 'gpt-5' },
-    write_permission: 'workspace-write',
-    prompt: ''
+    schema: 'ai-de.execution-request/1',
+    operation: 'start',
+    request_id: requestId,
+    case_id: 'test-case',
+    task_id: 'test-task',
+    attempt_id: 'test-attempt',
+    packet_digest: `sha256:${'0'.repeat(64)}`,
+    launch_plan_digest: launchPlanDigest,
+    ...EXECUTION_REQUEST_CONTRACT_VERSIONS,
+    issued_at: now.toISOString(),
+    expires_at: expiresAt.toISOString(),
+    operation_payload: {
+      adapter: 'codex',
+      model: { adapter: 'codex', concrete_model_id: 'gpt-5' },
+      write_permission: 'workspace-write',
+      prompt: ''
+    }
   }
 
   const payloadBytes = canonicalBytes(payload)
@@ -43,12 +58,12 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
     binding: {
       authority_id: 'test-authority',
       operation: 'start',
-      request_id: `test-request-${Math.random()}`,
+      request_id: requestId,
       case_id: 'test-case',
       task_id: 'test-task',
       attempt_id: 'test-attempt',
       packet_digest: `sha256:${'0'.repeat(64)}`,
-      launch_plan_digest: `sha256:${'1'.repeat(64)}`,
+      launch_plan_digest: launchPlanDigest,
       payload_digest: payloadDigest,
       ...EXECUTION_REQUEST_CONTRACT_VERSIONS
     },
@@ -56,6 +71,18 @@ function createValidRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteReq
     issued_at: now.toISOString(),
     expires_at: expiresAt.toISOString(),
     ...overrides
+  }
+}
+
+function withPayloadDigest(request: ExecuteRequest, payload: Record<string, unknown>): ExecuteRequest {
+  const payloadDigest = `sha256:${crypto
+    .createHash('sha256')
+    .update(canonicalBytes(payload))
+    .digest('hex')}`
+  return {
+    ...request,
+    binding: { ...request.binding, payload_digest: payloadDigest },
+    payload
   }
 }
 
@@ -165,6 +192,26 @@ describe('issuer', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(IssuerError)
       expect((error as IssuerError).code).toBe(IssuerErrorCode.FUTURE_ISSUED_AT)
+    }
+  })
+
+  test('負試験8: request root の operation_payload 欠落 → INVALID_OPERATION_PAYLOAD', () => {
+    const request = createValidRequest()
+    const payload = { ...request.payload }
+    delete payload.operation_payload
+    const malformedRequest = withPayloadDigest(request, payload)
+
+    expect(() => mintAuthorization(malformedRequest)).toThrow(IssuerError)
+    try {
+      mintAuthorization(malformedRequest)
+    } catch (error) {
+      expect(error).toBeInstanceOf(IssuerError)
+      expect((error as IssuerError).code).toBe(IssuerErrorCode.INVALID_OPERATION_PAYLOAD)
+      expect((error as IssuerError).detail).toEqual({
+        layer: 'payload',
+        field: 'operation_payload',
+        rule: 'required'
+      })
     }
   })
 })
