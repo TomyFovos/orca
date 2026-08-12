@@ -10,6 +10,7 @@ import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
 import {
+  EXECUTION_REQUEST_BINDING_PAYLOAD_EQUIVALENCE_FIELDS,
   EXECUTION_REQUEST_CONTRACT_VERSIONS,
   type ExecutionOperation
 } from '../execution-request-contract'
@@ -108,6 +109,33 @@ function createSignedOperationRequest(
     payload,
     issued_at: issuedAt.toISOString(),
     expires_at: expiresAt.toISOString()
+  }
+}
+
+function withResignedPayloadMismatch(
+  request: ExecuteRequest,
+  field: (typeof EXECUTION_REQUEST_BINDING_PAYLOAD_EQUIVALENCE_FIELDS)[number]
+): ExecuteRequest {
+  const payload = {
+    ...request.payload,
+    [field]: field === 'launch_plan_digest' ? `sha256:${'1'.repeat(64)}` : `mismatched-${field}`
+  }
+  const binding = { ...request.binding, payload_digest: sha256Canonical(payload) }
+  const signature = sign(
+    null,
+    canonicalBytes({
+      binding,
+      issued_at: request.issued_at,
+      expires_at: request.expires_at
+    }),
+    keyPair.privateKey
+  )
+
+  return {
+    ...request,
+    signature: { ...request.signature, value: signature.toString('hex') },
+    binding,
+    payload
   }
 }
 
@@ -365,6 +393,42 @@ describe('managed execution endpoint authorization path', () => {
       await closeServer(server!)
     }
   })
+
+  it.each(EXECUTION_REQUEST_BINDING_PAYLOAD_EQUIVALENCE_FIELDS)(
+    'rejects a re-signed binding and payload mismatch for %s before the protected effect',
+    async (field) => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const request = withResignedPayloadMismatch(createSignedRequest(), field)
+      const response = await postExecute(port, request)
+
+      expect(response.status).toBe(400)
+      expect(response.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'BINDING_PAYLOAD_MISMATCH'
+      })
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${request.binding.request_id} code=BINDING_PAYLOAD_MISMATCH layer=binding field=/payload/${field} rule=matches-binding`
+      )
+      expect(protectedEffectCalls).toBe(0)
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+    }
+  )
 
   it('executes every contract-compliant operation payload through the endpoint', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)

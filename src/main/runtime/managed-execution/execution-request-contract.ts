@@ -31,6 +31,11 @@ export type OperationPayloadContractViolation = Readonly<{
   rule: string
 }>
 
+export type BindingPayloadEquivalenceViolation = Readonly<{
+  field: string
+  rule: 'matches-binding'
+}>
+
 const SHA256_PATTERN = '^sha256:[0-9a-f]{64}$'
 
 export const EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS = [
@@ -46,6 +51,19 @@ export const EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS = [
   'issued_at',
   'expires_at',
   'operation_payload'
+] as const
+
+// The worker executes payload values, while Orca authorizes binding values.
+export const EXECUTION_REQUEST_BINDING_PAYLOAD_EQUIVALENCE_FIELDS = [
+  'operation',
+  'request_id',
+  'case_id',
+  'task_id',
+  'attempt_id',
+  'packet_digest',
+  'launch_plan_digest',
+  'protocol_version',
+  'schema_version'
 ] as const
 
 export const EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT: Readonly<
@@ -146,6 +164,18 @@ export function findOperationPayloadContractViolation(
     contract.payload,
     'operation_payload'
   )
+}
+
+export function findBindingPayloadEquivalenceViolation(
+  binding: Record<string, unknown>,
+  payload: Record<string, unknown>
+): BindingPayloadEquivalenceViolation | null {
+  for (const field of EXECUTION_REQUEST_BINDING_PAYLOAD_EQUIVALENCE_FIELDS) {
+    if (binding[field] !== payload[field]) {
+      return { field: `/payload/${field}`, rule: 'matches-binding' }
+    }
+  }
+  return null
 }
 
 function isExecutionOperation(value: string): value is ExecutionOperation {

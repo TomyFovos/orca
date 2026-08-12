@@ -7,7 +7,10 @@ import {
 } from './authorization'
 import { createHash } from 'node:crypto'
 import { canonicalBytes } from './canonical'
-import { findOperationPayloadContractViolation } from './execution-request-contract'
+import {
+  findBindingPayloadEquivalenceViolation,
+  findOperationPayloadContractViolation
+} from './execution-request-contract'
 
 const MAX_EXPIRY_DURATION_MS = 5 * 60 * 1000 // 5分
 const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
@@ -44,6 +47,7 @@ export enum IssuerErrorCode {
   FUTURE_ISSUED_AT = 'FUTURE_ISSUED_AT',
   INVALID_BINDING = 'INVALID_BINDING',
   PAYLOAD_DIGEST_MISMATCH = 'PAYLOAD_DIGEST_MISMATCH',
+  BINDING_PAYLOAD_MISMATCH = 'BINDING_PAYLOAD_MISMATCH',
   REPLAY_ATTACK = 'REPLAY_ATTACK',
   REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD = 'REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD',
   UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
@@ -108,6 +112,23 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
       field: 'payload_digest',
       rule: 'matches-envelope-payload'
     })
+  }
+
+  // Agents can bypass their own controls, so Orca binds the authorized values to worker input.
+  const bindingPayloadViolation = findBindingPayloadEquivalenceViolation(
+    envelope.binding,
+    envelope.payload
+  )
+  if (bindingPayloadViolation) {
+    throw new IssuerError(
+      IssuerErrorCode.BINDING_PAYLOAD_MISMATCH,
+      'binding and payload values must match',
+      {
+        layer: 'binding',
+        field: bindingPayloadViolation.field,
+        rule: bindingPayloadViolation.rule
+      }
+    )
   }
 
   // 4. replay を期限判定より先に照合する。期限切れ既知 request を replayed と区別し、
