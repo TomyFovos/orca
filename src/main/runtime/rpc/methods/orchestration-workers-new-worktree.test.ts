@@ -1,5 +1,6 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -190,14 +191,24 @@ describe('orchestration new-worktree workers', () => {
   function configureReachableLinkedGitdir() {
     const base = mkdtempSync(join(tmpdir(), 'orca-worker-start-git-'))
     chmodSync(base, 0o755)
-    const commonDir = join(base, 'repository.git')
-    const gitdir = join(commonDir, 'worktrees', 'worker')
+    const repository = join(base, 'repository')
     const worktreePath = join(base, 'worktree')
-    mkdirSync(gitdir, { recursive: true, mode: 0o755 })
-    mkdirSync(worktreePath, { mode: 0o755 })
-    writeFileSync(join(gitdir, 'commondir'), '../..\n')
-    writeFileSync(join(worktreePath, '.git'), `gitdir: ${gitdir}\n`)
-    return { base, commonDir, worktreePath }
+    mkdirSync(repository, { mode: 0o755 })
+    execFileSync('git', ['init', '-q'], { cwd: repository })
+    execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'fixture'], {
+      cwd: repository,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Orca Test',
+        GIT_AUTHOR_EMAIL: 'orca-test@example.invalid',
+        GIT_COMMITTER_NAME: 'Orca Test',
+        GIT_COMMITTER_EMAIL: 'orca-test@example.invalid'
+      }
+    })
+    execFileSync('git', ['worktree', 'add', '--detach', '-q', worktreePath, 'HEAD'], {
+      cwd: repository
+    })
+    return { base, commonDir: join(repository, '.git'), worktreePath }
   }
 
   it('rejects a reachable linked gitdir in an existing worktree before creating the worker terminal', async () => {
@@ -252,6 +263,30 @@ describe('orchestration new-worktree workers', () => {
       })
       expect(createWorktree).not.toHaveBeenCalled()
       expect(runtime.createTerminal).not.toHaveBeenCalled()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('allows a reachable Git worktree in the default profile', async () => {
+    const { base, worktreePath } = configureReachableLinkedGitdir()
+    vi.mocked(runtime.createTerminal).mockResolvedValue({ handle: 'term_worker' } as never)
+    vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
+      id: 'repo::worker',
+      repoId: 'repo',
+      git: { path: worktreePath }
+    } as never)
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo',
+      kind: 'git',
+      path: worktreePath
+    } as never)
+
+    try {
+      await expect(startExistingWorktreeWorker()).resolves.toMatchObject({
+        result: { state: 'ready' }
+      })
+      expect(runtime.createTerminal).toHaveBeenCalled()
     } finally {
       rmSync(base, { recursive: true, force: true })
     }
