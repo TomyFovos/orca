@@ -1,13 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import * as fs from 'node:fs'
-import * as path from 'node:path'
 import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
-import { validateReceiptWithAiDe } from './ai-de-receipt-validator'
-const OUTPUT_DIR = path.join(__dirname, 'test-receipts')
-
-if (!fs.existsSync(OUTPUT_DIR)) {
-  fs.mkdirSync(OUTPUT_DIR, { recursive: true })
-}
+import { validateReceiptWithAiDe } from './ai-de-receipt-contract'
 
 describe('Orca receipt validation with AI-DE validator', () => {
   it('accepted receipt (outcome=accepted, backend_kind=orca) is valid', async () => {
@@ -28,10 +21,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
       accepted_at: new Date().toISOString()
     }
 
-    const receiptPath = path.join(OUTPUT_DIR, 'accepted-orca.json')
-    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
-
-    const result = validateReceiptWithAiDe(receiptPath)
+    const result = validateReceiptWithAiDe(receipt)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
@@ -54,10 +44,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
       accepted_at: new Date().toISOString()
     }
 
-    const receiptPath = path.join(OUTPUT_DIR, 'replayed-orca.json')
-    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
-
-    const result = validateReceiptWithAiDe(receiptPath)
+    const result = validateReceiptWithAiDe(receipt)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
@@ -81,10 +68,7 @@ describe('Orca receipt validation with AI-DE validator', () => {
       accepted_at: new Date().toISOString()
     }
 
-    const receiptPath = path.join(OUTPUT_DIR, 'rejected-orca.json')
-    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
-
-    const result = validateReceiptWithAiDe(receiptPath)
+    const result = validateReceiptWithAiDe(receipt)
     expect(result.valid).toBe(true)
     expect(result.output).toContain('Receipt is valid')
   })
