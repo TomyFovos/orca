@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   MANAGED_ORCA_RUNTIME_PROFILE,
   ORCA_RUNTIME_PROFILE_ENV,
@@ -17,12 +17,24 @@ describe('managed execution authorization boundary', () => {
     setProcessRuntimeProfile('default')
   })
 
-  it('rejects an RPC-reconstructable authorization value in managed mode', () => {
+  it.each([
+    ['target CLI startup', 'target-cli-startup'],
+    ['managed worker startup', 'managed-worker-startup'],
+    ['automation worker startup', 'automation-worker-startup'],
+    ['Claude Agent Teams startup', 'claude-agent-teams'],
+    ['managed worktree removal', 'managed-worktree-removal'],
+    ['managed Task creation', 'task-dispatch-mutation']
+  ])('records the managed %s rejection reason', (operation, field) => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    expect(() => assertManagedExecutionAuthorized('worker startup', {})).toThrow(
+    expect(() => assertManagedExecutionAuthorized(operation, {})).toThrow(
       ManagedExecutionAuthorizationRequiredError
     )
+    expect(error).toHaveBeenCalledWith(
+      `[managed-execution] Request rejected: operation=${field} layer=authorization field=${field} rule=external-control-plane-authorization`
+    )
+    error.mockRestore()
   })
 
   it('accepts a capability minted by the module-private issuer path', () => {
@@ -34,8 +46,11 @@ describe('managed execution authorization boundary', () => {
 
   it('keeps the default profile authorization-free', () => {
     setProcessRuntimeProfile('default')
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     expect(() => assertManagedExecutionAuthorized('worker startup', {})).not.toThrow()
+    expect(error).not.toHaveBeenCalled()
+    error.mockRestore()
   })
 
   it('only injects the managed profile into child environments', () => {

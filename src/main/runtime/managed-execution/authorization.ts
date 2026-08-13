@@ -54,6 +54,91 @@ export type ManagedExecutionAuthorization = Readonly<{
 
 const issuedAuthorizations = new WeakSet<object>()
 
+type ManagedExecutionAuthorizationRejectionDetail = Readonly<{
+  layer: 'authorization'
+  operation: string
+  field: string
+  rule: 'external-control-plane-authorization'
+}>
+
+const authorizationRejectionByOperation: Readonly<
+  Record<string, ManagedExecutionAuthorizationRejectionDetail>
+> = {
+  'target CLI startup': {
+    layer: 'authorization',
+    operation: 'target-cli-startup',
+    field: 'target-cli-startup',
+    rule: 'external-control-plane-authorization'
+  },
+  'managed worker startup': {
+    layer: 'authorization',
+    operation: 'managed-worker-startup',
+    field: 'managed-worker-startup',
+    rule: 'external-control-plane-authorization'
+  },
+  'automation worker startup': {
+    layer: 'authorization',
+    operation: 'automation-worker-startup',
+    field: 'automation-worker-startup',
+    rule: 'external-control-plane-authorization'
+  },
+  'Claude Agent Teams startup': {
+    layer: 'authorization',
+    operation: 'claude-agent-teams',
+    field: 'claude-agent-teams',
+    rule: 'external-control-plane-authorization'
+  },
+  'Claude Agent Teams tmux compatibility': {
+    layer: 'authorization',
+    operation: 'claude-agent-teams',
+    field: 'claude-agent-teams',
+    rule: 'external-control-plane-authorization'
+  },
+  'managed worktree removal': {
+    layer: 'authorization',
+    operation: 'managed-worktree-removal',
+    field: 'managed-worktree-removal',
+    rule: 'external-control-plane-authorization'
+  },
+  'orchestration task or dispatch mutation': {
+    layer: 'authorization',
+    operation: 'task-dispatch-mutation',
+    field: 'task-dispatch-mutation',
+    rule: 'external-control-plane-authorization'
+  },
+  'managed Task creation': {
+    layer: 'authorization',
+    operation: 'task-dispatch-mutation',
+    field: 'task-dispatch-mutation',
+    rule: 'external-control-plane-authorization'
+  },
+  'managed Task modification': {
+    layer: 'authorization',
+    operation: 'task-dispatch-mutation',
+    field: 'task-dispatch-mutation',
+    rule: 'external-control-plane-authorization'
+  },
+  'managed Dispatch creation': {
+    layer: 'authorization',
+    operation: 'task-dispatch-mutation',
+    field: 'task-dispatch-mutation',
+    rule: 'external-control-plane-authorization'
+  }
+}
+
+function logManagedExecutionAuthorizationRejection(operation: string): void {
+  const detail = authorizationRejectionByOperation[operation] ?? {
+    layer: 'authorization' as const,
+    operation: 'unrecognized-operation',
+    field: 'operation',
+    rule: 'external-control-plane-authorization' as const
+  }
+  // Orca records this boundary rejection because launched agents can bypass their own safeguards.
+  console.error(
+    `[managed-execution] Request rejected: operation=${detail.operation} layer=${detail.layer} field=${detail.field} rule=${detail.rule}`
+  )
+}
+
 /**
  * Mint a process-local capability after the envelope issuer has completed all
  * external-control-plane validation. The object is intentionally opaque: only
@@ -92,6 +177,7 @@ export function assertManagedExecutionAuthorized(
   ) {
     return
   }
+  logManagedExecutionAuthorizationRejection(operation)
   throw new ManagedExecutionAuthorizationRequiredError(operation)
 }
 
