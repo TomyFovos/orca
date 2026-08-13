@@ -7,6 +7,7 @@ import {
 import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
+import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
 import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
@@ -100,7 +101,6 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       const coordinatorWorktree = await runtime.showManagedWorktree(
         `id:${coordinatorTerminal.worktreeId}`
       )
-      const workerRepo = await runtime.showRepo(params.repo ?? coordinatorWorktree.repoId)
       if (createsWorktree) {
         await assertOrchestrationWorktreeCreationSupported({
           runtime,
@@ -113,15 +113,18 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         : requestedWorktree === 'current'
           ? coordinatorWorktree
           : await runtime.showManagedWorktree(requestedWorktree)
-      if (createsWorktree) {
-        assertManagedWorkerGitIsolated(workerRepo.path, {
-          hostUnvalidatable: Boolean(workerRepo.connectionId)
-        })
-      } else if (resolvedWorktree) {
-        const resolvedRepo = await runtime.showRepo(resolvedWorktree.repoId)
-        assertManagedWorkerGitIsolated(resolvedWorktree.git.path, {
-          hostUnvalidatable: Boolean(resolvedRepo.connectionId)
-        })
+      if (getProcessRuntimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
+        if (createsWorktree) {
+          const workerRepo = await runtime.showRepo(params.repo ?? coordinatorWorktree.repoId)
+          assertManagedWorkerGitIsolated(workerRepo.path, {
+            hostUnvalidatable: Boolean(workerRepo.connectionId)
+          })
+        } else if (resolvedWorktree) {
+          const resolvedRepo = await runtime.showRepo(resolvedWorktree.repoId)
+          assertManagedWorkerGitIsolated(resolvedWorktree.git.path, {
+            hostUnvalidatable: Boolean(resolvedRepo.connectionId)
+          })
+        }
       }
       let explicitTerminal
       if (params.terminal) {
