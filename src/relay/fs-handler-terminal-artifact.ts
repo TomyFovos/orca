@@ -147,7 +147,7 @@ async function openVerifiedTerminalArtifact(
     return await open(filePath, flags | OPEN_NOFOLLOW)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error('terminal_file_grant_stale')
+      throw terminalArtifactStaleError('relay_open', 'no_symlink')
     }
     throw error
   }
@@ -175,7 +175,7 @@ async function assertRealPathStillGranted(
   // Why: terminal artifacts are user-writable temp paths; the relay must check
   // canonicality in the same remote operation that opens the file handle.
   if ((await realpath(filePath)) !== expectedRealPath) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalArtifactStaleError('relay_real_path', 'matches_grant')
   }
 }
 
@@ -227,7 +227,7 @@ function terminalArtifactStatIdentity(stats: {
 
 function assertTerminalArtifactNotHardLinked(stats: TerminalArtifactStat): void {
   if (typeof stats.nlink === 'number' && stats.nlink > 1) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalArtifactStaleError('relay_link_count', 'exactly_one')
   }
 }
 
@@ -241,7 +241,7 @@ function assertTerminalArtifactStatIdentity(
     nextIdentity !== null &&
     expectedStatIdentity !== nextIdentity
   ) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalArtifactStaleError('relay_stat_identity', 'matches_grant')
   }
 }
 

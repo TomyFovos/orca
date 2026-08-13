@@ -420,7 +420,12 @@ describe('FsHandler', () => {
         expectedStatIdentity: statIdentity(stats),
         maxBytes: 512 * 1024
       })
-    ).rejects.toThrow('terminal_file_grant_stale')
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'relay_real_path',
+      rule: 'matches_grant'
+    })
     await expect(fs.readFile(outsidePath, 'utf-8')).resolves.toBe('{"secret":true}')
   })
 
@@ -439,7 +444,12 @@ describe('FsHandler', () => {
         expectedStatIdentity: statIdentity(stats),
         maxBytes: 512 * 1024
       })
-    ).rejects.toThrow('terminal_file_grant_stale')
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'relay_link_count',
+      rule: 'exactly_one'
+    })
     await expect(fs.readFile(outsidePath, 'utf-8')).resolves.toBe('{"secret":true}')
   })
 

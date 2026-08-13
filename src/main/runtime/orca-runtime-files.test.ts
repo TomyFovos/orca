@@ -1636,7 +1636,12 @@ describe('RuntimeFileCommands', () => {
           '{"ok":false}',
           'client-a'
         )
-      ).rejects.toThrow('terminal_file_grant_stale')
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'stat_identity',
+        rule: 'matches_grant'
+      })
       await expect(readFile(artifactPath, 'utf8')).resolves.toBe('{"ok":"ext"}')
     })
 
@@ -1679,7 +1684,12 @@ describe('RuntimeFileCommands', () => {
           '{"ok":false}',
           'client-a'
         )
-      ).rejects.toThrow('terminal_file_grant_stale')
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'link_count',
+        rule: 'exactly_one'
+      })
       await expect(readFile(artifactPath, 'utf8')).resolves.toBe('{"ok":true}')
     })
 
@@ -1701,7 +1711,12 @@ describe('RuntimeFileCommands', () => {
           target.absolutePath,
           'client-a'
         )
-      ).rejects.toThrow('terminal_file_grant_stale')
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'local_real_path',
+        rule: 'matches_grant'
+      })
     })
 
     it('rejects retargeted symlink terminal artifact reads before returning outside content', async () => {
@@ -1723,7 +1738,12 @@ describe('RuntimeFileCommands', () => {
           target.absolutePath,
           'client-a'
         )
-      ).rejects.toThrow('terminal_file_grant_stale')
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'remote_real_path',
+        rule: 'matches_grant'
+      })
     })
 
     it('rejects retargeted symlink terminal artifact writes before changing outside content', async () => {
