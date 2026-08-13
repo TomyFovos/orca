@@ -289,6 +289,53 @@ describe('managed execution endpoint authorization path', () => {
     }
   })
 
+  it('does not reject a contract-maximum escaped Unicode prompt body by maximum bytes', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const escapedEmoji = '\\ud83d\\ude00'.repeat(262_144)
+      const body = `{"prompt":"${escapedEmoji}"}`
+      expect(Buffer.byteLength(body)).toBeGreaterThanOrEqual(3_145_730)
+
+      const port = (server!.address() as AddressInfo).port
+      const response = await postRawExecute(port, body)
+
+      expect(response.status).toBe(400)
+      expect(response.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
+      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain('rule=maximum-bytes')
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('does not reject a contract-maximum escaped prompt body by maximum bytes', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const escapedContractMaximumPrompt = '\\ud83d\\ude00'.repeat(262_144)
+      const body = `{"prompt":"${escapedContractMaximumPrompt}"}`
+      expect(Buffer.byteLength(body)).toBeGreaterThanOrEqual(3_145_730)
+
+      const response = await postRawExecute(port, body)
+
+      expect(response.status).toBe(400)
+      expect(errorSpy).not.toHaveBeenCalledWith(
+        '[managed-execution] Malformed request: request_id=取得不能 layer=transport field=body rule=maximum-bytes'
+      )
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
   it('rejects a stalled body read and records its timeout classification', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
     const server = await startManagedExecutionEndpoint({ port: 0, bodyReadTimeoutMs: 30 })

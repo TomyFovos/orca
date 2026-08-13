@@ -1,6 +1,7 @@
 import type { IncomingMessage } from 'node:http'
 
-export const MAX_MANAGED_EXECUTION_BODY_BYTES = 1024 * 1024
+// 8 MiB admits the contract's 3,145,730-byte escaped-prompt envelope while bounding input.
+export const MAX_MANAGED_EXECUTION_BODY_BYTES = 8 * 1024 * 1024
 export const MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS = 15_000
 
 export type RequestBodyRejectionDetail = Readonly<{
