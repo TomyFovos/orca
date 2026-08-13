@@ -1,6 +1,5 @@
 import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest'
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
-import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
@@ -12,16 +11,7 @@ import { startManagedExecutionEndpoint } from '../endpoint'
 import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
-
-const AI_DE_PATH = '/home/atsou/src/github.com/TomyFovos/AI-DE'
-const AI_DE_SCHEMA_VALIDATOR = path.join(
-  AI_DE_PATH,
-  'harness/runtime/execution-packet/schema-validator.js'
-)
-const AI_DE_RECEIPT_SCHEMA = path.join(
-  AI_DE_PATH,
-  'knowledge/schemas/execution-receipt-1.schema.json'
-)
+import { validateReceiptWithAiDe } from './ai-de-receipt-contract'
 const keyPair = generateKeyPairSync('ed25519', {
   publicKeyEncoding: { type: 'spki', format: 'pem' },
   privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
@@ -87,45 +77,12 @@ async function closeServer(server: Server) {
   })
 }
 
-async function validateWithAiDe(receipt: unknown, label: string): Promise<string> {
-  const outputDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orca-managed-e2e-'))
-  const receiptPath = path.join(outputDir, `${label}.json`)
-  fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2))
-
-  try {
-    return await new Promise((resolve, reject) => {
-      const validatorSource = `
-        const fs = require('node:fs')
-        const { validateJsonSchema } = require(${JSON.stringify(AI_DE_SCHEMA_VALIDATOR)})
-        const receipt = JSON.parse(fs.readFileSync(process.env.ORCA_RECEIPT_PATH, 'utf8'))
-        const schema = JSON.parse(fs.readFileSync(${JSON.stringify(AI_DE_RECEIPT_SCHEMA)}, 'utf8'))
-        validateJsonSchema(receipt, schema)
-        process.stdout.write('SCHEMA_VALIDATION_PASSED')
-      `
-      const validator = spawn(process.execPath, ['-e', validatorSource], {
-        env: { ...process.env, ORCA_RECEIPT_PATH: receiptPath }
-      })
-      let stdout = ''
-      let stderr = ''
-
-      validator.stdout.on('data', (chunk: Buffer) => {
-        stdout += chunk.toString('utf8')
-      })
-      validator.stderr.on('data', (chunk: Buffer) => {
-        stderr += chunk.toString('utf8')
-      })
-      validator.on('error', reject)
-      validator.on('close', (code) => {
-        if (code === 0) {
-          resolve(stdout.trim())
-          return
-        }
-        reject(new Error(`${label}: AI-DE validator exited ${code}: ${stderr.trim()}`))
-      })
-    })
-  } finally {
-    fs.rmSync(outputDir, { recursive: true, force: true })
+function validateWithAiDe(receipt: unknown): string {
+  const result = validateReceiptWithAiDe(receipt)
+  if (!result.valid) {
+    throw new Error(`AI-DE receipt contract rejected receipt: ${result.output}`)
   }
+  return result.output
 }
 
 async function postExecute(port: number, request: ExecuteRequest) {
@@ -356,12 +313,12 @@ describe('managed execution endpoint authorization path', () => {
         outcome: 'accepted',
         backend_kind: 'orca'
       })
-      const acceptedValidation = await validateWithAiDe(accepted.receipt, 'accepted-orca')
+      const acceptedValidation = validateWithAiDe(accepted.receipt)
 
       const replayed = await postExecute(port, acceptedRequest)
       expect(replayed.status).toBe(200)
       expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
-      const replayedValidation = await validateWithAiDe(replayed.receipt, 'replayed-orca')
+      const replayedValidation = validateWithAiDe(replayed.receipt)
 
       const rejectedRequest = createSignedRequest()
       rejectedRequest.signature.value = 'b'.repeat(128)
@@ -373,7 +330,7 @@ describe('managed execution endpoint authorization path', () => {
         backend_kind: 'orca',
         reject_reason: 'INVALID_SIGNATURE'
       })
-      const rejectedValidation = await validateWithAiDe(rejected.receipt, 'rejected-orca')
+      const rejectedValidation = validateWithAiDe(rejected.receipt)
 
       console.log(
         `[AI-DE validator] accepted=${acceptedValidation}; replayed=${replayedValidation}; rejected=${rejectedValidation}`

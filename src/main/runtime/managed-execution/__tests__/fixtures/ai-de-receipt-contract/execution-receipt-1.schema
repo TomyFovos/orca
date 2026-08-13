@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-de.local/schemas/execution-receipt-1.schema.json",
+  "title": "AI-DE Managed Execution Receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "request_id",
+    "operation",
+    "case_id",
+    "task_id",
+    "attempt_id",
+    "outcome",
+    "backend_kind",
+    "protocol_version",
+    "schema_version",
+    "accepted_at"
+  ],
+  "properties": {
+    "schema": { "const": "ai-de.execution-receipt/1" },
+    "request_id": { "$ref": "#/$defs/uuid" },
+    "operation": { "enum": ["prepare", "start", "stop", "cleanup"] },
+    "case_id": { "$ref": "#/$defs/caseId" },
+    "task_id": { "$ref": "#/$defs/taskId" },
+    "attempt_id": { "$ref": "#/$defs/taskId" },
+    "outcome": { "enum": ["accepted", "replayed", "rejected"] },
+    "reject_reason": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]{0,63}$" },
+    "backend_kind": { "enum": ["dry_run", "direct_cli", "orca"] },
+    "backend_ref": {
+      "oneOf": [ { "$ref": "#/$defs/identifier" }, { "type": "null" } ]
+    },
+    "backend_session_id": {
+      "oneOf": [ { "$ref": "#/$defs/identifier" }, { "type": "null" } ]
+    },
+    "protocol_version": { "const": "ai-de.protocol/1" },
+    "schema_version": { "$ref": "#/$defs/identifier" },
+    "accepted_at": { "type": "string", "format": "date-time" }
+  },
+  "oneOf": [
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "accepted" },
+        "backend_kind": { "const": "orca" },
+        "backend_ref": { "$ref": "#/$defs/identifier" },
+        "backend_session_id": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "accepted" },
+        "backend_kind": { "const": "dry_run" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "accepted" },
+        "backend_kind": { "const": "direct_cli" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "replayed" },
+        "backend_kind": { "const": "orca" },
+        "backend_ref": { "$ref": "#/$defs/identifier" },
+        "backend_session_id": { "$ref": "#/$defs/identifier" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "replayed" },
+        "backend_kind": { "const": "dry_run" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "replayed" },
+        "backend_kind": { "const": "direct_cli" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "reject_reason", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "rejected" },
+        "backend_kind": { "const": "orca" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "reject_reason", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "rejected" },
+        "backend_kind": { "const": "dry_run" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    },
+    {
+      "required": ["outcome", "backend_kind", "reject_reason", "backend_ref", "backend_session_id"],
+      "properties": {
+        "outcome": { "const": "rejected" },
+        "backend_kind": { "const": "direct_cli" },
+        "backend_ref": { "type": "null" },
+        "backend_session_id": { "type": "null" }
+      }
+    }
+  ],
+  "$defs": {
+    "uuid": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+    },
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/-]{0,255}$"
+    },
+    "caseId": {
+      "type": "string",
+      "pattern": "^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$"
+    },
+    "taskId": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
+    }
+  }
+}
