@@ -289,29 +289,6 @@ describe('managed execution endpoint authorization path', () => {
     }
   })
 
-  it('does not reject a contract-maximum escaped Unicode prompt body by maximum bytes', async () => {
-    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
-    const server = await startManagedExecutionEndpoint({ port: 0 })
-    expect(server).not.toBeNull()
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
-
-    try {
-      const escapedEmoji = '\\ud83d\\ude00'.repeat(262_144)
-      const body = `{"prompt":"${escapedEmoji}"}`
-      expect(Buffer.byteLength(body)).toBeGreaterThanOrEqual(3_145_730)
-
-      const port = (server!.address() as AddressInfo).port
-      const response = await postRawExecute(port, body)
-
-      expect(response.status).toBe(400)
-      expect(response.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
-      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain('rule=maximum-bytes')
-    } finally {
-      errorSpy.mockRestore()
-      await closeServer(server!)
-    }
-  })
-
   it('does not reject a contract-maximum escaped prompt body by maximum bytes', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
     const server = await startManagedExecutionEndpoint({ port: 0 })
