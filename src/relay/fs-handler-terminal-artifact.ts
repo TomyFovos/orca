@@ -254,8 +254,20 @@ function assertTerminalArtifactContentDigest(expectedContentDigest: string | nul
     expectedContentDigest !== null &&
     expectedContentDigest !== terminalArtifactContentDigest(content)
   ) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalArtifactStaleError('content_digest', 'sha256_match')
   }
+}
+
+function terminalArtifactStaleError(field: string, rule: string): Error & {
+  layer: 'terminal_artifact_grant'
+  field: string
+  rule: string
+} {
+  return Object.assign(new Error('terminal_file_grant_stale'), {
+    layer: 'terminal_artifact_grant' as const,
+    field,
+    rule
+  })
 }
 
 function verifiedTerminalArtifactOptions(

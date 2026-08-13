@@ -299,7 +299,12 @@ describe('FsHandler', () => {
         expectedContentDigest: createHash('sha256').update('{"ok":true}').digest('hex'),
         maxBytes: 512 * 1024
       })
-    ).rejects.toThrow('terminal_file_grant_stale')
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'content_digest',
+      rule: 'sha256_match'
+    })
   })
 
   it('readTerminalArtifact treats SVG artifacts as editable text', async () => {

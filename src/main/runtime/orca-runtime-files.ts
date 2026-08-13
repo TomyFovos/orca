@@ -2490,8 +2490,20 @@ function terminalArtifactContentDigest(content: Buffer): string {
 function assertTerminalFileGrantContentFresh(grant: TerminalFileGrant, content: Buffer): void {
   // Why: terminal agents can replace artifacts after a tap, so Orca—not the agent—must enforce freshness.
   if (grant.contentDigest !== terminalArtifactContentDigest(content)) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalFileGrantStaleError('content_digest', 'sha256_match')
   }
+}
+
+function terminalFileGrantStaleError(field: string, rule: string): Error & {
+  layer: 'terminal_artifact_grant'
+  field: string
+  rule: string
+} {
+  return Object.assign(new Error('terminal_file_grant_stale'), {
+    layer: 'terminal_artifact_grant' as const,
+    field,
+    rule
+  })
 }
 
 function assertTerminalFileGrantFresh(grant: TerminalFileGrant, stats: RuntimeFileStatLike): void {
