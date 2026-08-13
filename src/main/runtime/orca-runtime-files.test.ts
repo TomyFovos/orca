@@ -1714,7 +1714,7 @@ describe('RuntimeFileCommands', () => {
       ).rejects.toMatchObject({
         message: 'terminal_file_grant_stale',
         layer: 'terminal_artifact_grant',
-        field: 'local_real_path',
+        field: 'stat_identity',
         rule: 'matches_grant'
       })
     })
@@ -1741,7 +1741,7 @@ describe('RuntimeFileCommands', () => {
       ).rejects.toMatchObject({
         message: 'terminal_file_grant_stale',
         layer: 'terminal_artifact_grant',
-        field: 'remote_real_path',
+        field: 'local_real_path',
         rule: 'matches_grant'
       })
     })
@@ -1768,6 +1768,121 @@ describe('RuntimeFileCommands', () => {
         )
       ).rejects.toThrow('terminal_file_grant_stale')
       await expect(readFile(outsidePath, 'utf8')).resolves.toBe('{"secret":true}')
+    })
+
+    it('records local symlink-open races after a grant is created', async () => {
+      const artifactPath = await tempFile('result.json', '{"ok":true}')
+      const { commands } = createRuntimeFileCommands({ path: '/repo' })
+      resolveAuthorizedPathMock.mockImplementation(async (p: string) => p)
+      const result = await resolveTerminalArtifactPath(commands, artifactPath)
+      const target = absoluteFileTarget(result)
+
+      openMock.mockRejectedValueOnce(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }))
+
+      await expect(
+        commands.readTerminalArtifactFile(
+          'id:wt-1',
+          target.grantId,
+          target.absolutePath,
+          'client-a'
+        )
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'local_open',
+        rule: 'no_symlink'
+      })
+    })
+
+    it('records terminal artifact snapshot symlink-open races', async () => {
+      const artifactPath = await tempFile('result.json', '{"ok":true}')
+      const { commands } = createRuntimeFileCommands({ path: '/repo' })
+      const actualFs = await vi.importActual<typeof FsPromises>('fs/promises')
+      let openCalls = 0
+      resolveAuthorizedPathMock.mockImplementation(async (p: string) => p)
+      openMock.mockImplementation(async (...args: Parameters<typeof actualFs.open>) => {
+        openCalls += 1
+        const handle = await actualFs.open(...args)
+        return openCalls === 2
+          ? Object.assign(handle, {
+              read: vi.fn().mockRejectedValue(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }))
+            })
+          : handle
+      })
+
+      await expect(resolveTerminalArtifactPath(commands, artifactPath)).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'snapshot_open',
+        rule: 'no_symlink'
+      })
+    })
+
+    it('records terminal artifact type changes during grant snapshotting', async () => {
+      const artifactPath = await tempFile('result.json', '{"ok":true}')
+      const { commands } = createRuntimeFileCommands({ path: '/repo' })
+      const actualFs = await vi.importActual<typeof FsPromises>('fs/promises')
+      let openCalls = 0
+      resolveAuthorizedPathMock.mockImplementation(async (p: string) => p)
+      openMock.mockImplementation(async (...args: Parameters<typeof actualFs.open>) => {
+        openCalls += 1
+        if (openCalls === 2) {
+          await rm(artifactPath)
+          await actualFs.mkdir(artifactPath)
+        }
+        return actualFs.open(...args)
+      })
+
+      await expect(resolveTerminalArtifactPath(commands, artifactPath)).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'artifact_type',
+        rule: 'regular_file'
+      })
+    })
+
+    it('records terminal artifact snapshot stat-size limits', async () => {
+      const artifactPath = await tempFile('result.json', '{"ok":true}')
+      await writeFile(artifactPath, Buffer.alloc(11 * 1024 * 1024))
+      const { commands } = createRuntimeFileCommands({ path: '/repo' })
+      resolveAuthorizedPathMock.mockImplementation(async (p: string) => p)
+
+      await expect(resolveTerminalArtifactPath(commands, artifactPath)).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'stat_size',
+        rule: 'within_digest_limit'
+      })
+    })
+
+    it('records terminal artifact snapshot content-size limits after stat', async () => {
+      const artifactPath = await tempFile('result.json', '{"ok":true}')
+      const { commands } = createRuntimeFileCommands({ path: '/repo' })
+      const actualFs = await vi.importActual<typeof FsPromises>('fs/promises')
+      let openCalls = 0
+      resolveAuthorizedPathMock.mockImplementation(async (p: string) => p)
+      openMock.mockImplementation(async (...args: Parameters<typeof actualFs.open>) => {
+        openCalls += 1
+        const handle = await actualFs.open(...args)
+        if (openCalls !== 2) {
+          return handle
+        }
+        const originalStat = handle.stat.bind(handle)
+        return Object.assign(handle, {
+          stat: async () => {
+            const stats = await originalStat()
+            await writeFile(artifactPath, Buffer.alloc(11 * 1024 * 1024))
+            return stats
+          }
+        })
+      })
+
+      await expect(resolveTerminalArtifactPath(commands, artifactPath)).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'content_size',
+        rule: 'within_digest_limit'
+      })
     })
 
     it('does not renew stale terminal artifact grants', async () => {
