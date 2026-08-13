@@ -27,6 +27,7 @@ import { buildExcludePathPrefixes } from '../shared/quick-open-filter'
 import { buildInstallRgMessage } from './fs-handler-install-rg'
 import { readRelayFileContent, readRelayFileStreamMetadata } from './fs-handler-file-read'
 import {
+  getVerifiedTerminalArtifactSnapshot,
   readVerifiedTerminalArtifact,
   writeVerifiedTerminalArtifact
 } from './fs-handler-terminal-artifact'
@@ -105,6 +106,9 @@ export class FsHandler {
     this.dispatcher.onRequest('fs.readFile', (p) => this.readFile(p))
     this.dispatcher.onRequest('fs.readFileStream', (p, c) => this.readFileStream(p, c))
     this.dispatcher.onRequest('fs.readTerminalArtifact', (p) => this.readTerminalArtifact(p))
+    this.dispatcher.onRequest('fs.getTerminalArtifactSnapshot', (p) =>
+      this.getTerminalArtifactSnapshot(p)
+    )
     this.dispatcher.onRequest('fs.tempDir', () => this.tempDir())
     this.dispatcher.onRequest('fs.writeFile', (p) => this.writeFile(p))
     this.dispatcher.onRequest('fs.writeTerminalArtifact', (p) => this.writeTerminalArtifact(p))
@@ -163,6 +167,13 @@ export class FsHandler {
 
   private async readTerminalArtifact(params: Record<string, unknown>) {
     return readVerifiedTerminalArtifact({
+      ...params,
+      filePath: expandTilde(params.filePath as string)
+    })
+  }
+
+  private async getTerminalArtifactSnapshot(params: Record<string, unknown>) {
+    return getVerifiedTerminalArtifactSnapshot({
       ...params,
       filePath: expandTilde(params.filePath as string)
     })

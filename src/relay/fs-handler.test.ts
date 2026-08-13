@@ -5,6 +5,7 @@ import { RelayContext } from './context'
 import type { RelayDispatcher } from './dispatcher'
 import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
+import { createHash } from 'node:crypto'
 import { mkdtempSync, writeFileSync, mkdirSync, symlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { subscribeWithInProcessWatcher } from '../main/ipc/parcel-watcher-in-process-fallback'
@@ -283,6 +284,22 @@ describe('FsHandler', () => {
     })) as { content: string; isBinary: boolean }
 
     expect(result).toEqual({ content: '{"ok":true}', isBinary: false })
+  })
+
+  it('readTerminalArtifact rejects equal-stat content that differs from the granted digest', async () => {
+    const filePath = path.join(tmpDir, 'artifact-digest.json')
+    writeFileSync(filePath, '{"ok":false}')
+    const stats = await fs.stat(filePath)
+
+    await expect(
+      dispatcher.callRequest('fs.readTerminalArtifact', {
+        filePath,
+        expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: createHash('sha256').update('{"ok":true}').digest('hex'),
+        maxBytes: 512 * 1024
+      })
+    ).rejects.toThrow('terminal_file_grant_stale')
   })
 
   it('readTerminalArtifact treats SVG artifacts as editable text', async () => {

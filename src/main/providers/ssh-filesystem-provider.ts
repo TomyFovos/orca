@@ -19,6 +19,7 @@ import type {
   FileStat,
   FileReadResult,
   FileUploadSession,
+  TerminalArtifactSnapshot,
   TerminalArtifactAccessOptions
 } from './types'
 import type { DirEntry, FsChangeEvent, SearchOptions, SearchResult } from '../../shared/types'
@@ -118,8 +119,31 @@ export class SshFilesystemProvider implements IFilesystemProvider {
         filePath,
         expectedRealPath: options.expectedRealPath,
         expectedStatIdentity: options.expectedStatIdentity,
+        expectedContentDigest: options.expectedContentDigest,
         maxBytes: options.maxBytes
       })) as FileReadResult
+    } catch (err) {
+      if (isMethodNotFoundError(err)) {
+        throw new Error(
+          'Remote terminal artifact access is unavailable. Reconnect the SSH target before retrying.'
+        )
+      }
+      throw err
+    }
+  }
+
+  async getTerminalArtifactSnapshot(
+    filePath: string,
+    options: TerminalArtifactAccessOptions
+  ): Promise<TerminalArtifactSnapshot> {
+    try {
+      return (await this.mux.request('fs.getTerminalArtifactSnapshot', {
+        filePath,
+        expectedRealPath: options.expectedRealPath,
+        expectedStatIdentity: options.expectedStatIdentity,
+        expectedContentDigest: options.expectedContentDigest,
+        maxBytes: options.maxBytes
+      })) as TerminalArtifactSnapshot
     } catch (err) {
       if (isMethodNotFoundError(err)) {
         throw new Error(
@@ -173,6 +197,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
         content,
         expectedRealPath: options.expectedRealPath,
         expectedStatIdentity: options.expectedStatIdentity,
+        expectedContentDigest: options.expectedContentDigest,
         maxBytes: options.maxBytes
       })) as { stat?: FileStat }
     } catch (err) {

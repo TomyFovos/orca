@@ -25,6 +25,7 @@ export type {
   FileStat,
   FileUploadSession,
   IFilesystemProvider,
+  TerminalArtifactSnapshot,
   TerminalArtifactAccessOptions
 } from './filesystem-provider-contract'
 
