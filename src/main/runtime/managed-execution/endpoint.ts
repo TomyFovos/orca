@@ -3,6 +3,11 @@ import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runti
 import { isAuthorityRegistryLoaded } from './authority-registry'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from './issuer'
 import { assertManagedExecutionAuthorized } from './authorization'
+import {
+  MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS,
+  RequestBodyReadError,
+  readManagedExecutionRequestBody
+} from './request-body-reader'
 
 const DEFAULT_PORT = 6770
 const DEFAULT_HOST = '127.0.0.1'
@@ -11,6 +16,7 @@ export type EndpointConfig = {
   host?: string
   port?: number
   onProtectedEffect?: (payload: ExecuteRequest['payload']) => void
+  bodyReadTimeoutMs?: number
 }
 
 type ExecutionReceipt = {
@@ -57,22 +63,21 @@ export async function startManagedExecutionEndpoint(
 
   const host = config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_HOST
   const port = resolvePort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
+  const bodyReadTimeoutMs = resolveBodyReadTimeout(config.bodyReadTimeoutMs)
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'POST' || req.url !== '/execute') {
-      res.writeHead(404)
-      res.end()
+      respondJson(res, 404, {})
       return
     }
 
     let envelope: ExecuteRequest | undefined
 
     try {
-      const body = await readBody(req)
+      const body = await readManagedExecutionRequestBody(req, { timeoutMs: bodyReadTimeoutMs })
       const parsedEnvelope = parseExecuteRequest(JSON.parse(body))
       if (!parsedEnvelope) {
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { code: IssuerErrorCode.MALFORMED_REQUEST } }))
+        respondJson(res, 400, { error: { code: IssuerErrorCode.MALFORMED_REQUEST } })
         return
       }
       envelope = parsedEnvelope
@@ -106,10 +111,14 @@ export async function startManagedExecutionEndpoint(
         receipt
       })
 
-      res.writeHead(200, { 'Content-Type': 'application/json' })
-      res.end(JSON.stringify(receipt))
+      respondJson(res, 200, receipt)
     } catch (error) {
-      if (error instanceof IssuerError && envelope) {
+      if (error instanceof RequestBodyReadError) {
+        console.error(
+          `[managed-execution] Malformed request: request_id=取得不能 layer=${error.detail.layer} field=${error.detail.field} rule=${error.detail.rule}`
+        )
+        respondJson(res, 400, { error: { code: IssuerErrorCode.MALFORMED_REQUEST } })
+      } else if (error instanceof IssuerError && envelope) {
         // エラー応答も receipt 形式（execution-receipt/1 準拠）
         console.error(
           `[managed-execution] Request rejected: request_id=${envelope.binding.request_id} code=${error.code} layer=${error.detail.layer} field=${error.detail.field} rule=${error.detail.rule}`
@@ -121,8 +130,7 @@ export async function startManagedExecutionEndpoint(
             console.error(
               `[managed-execution] Replay receipt missing: request_id=${envelope.binding.request_id}`
             )
-            res.writeHead(500, { 'Content-Type': 'application/json' })
-            res.end(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }))
+            respondJson(res, 500, { error: { code: 'INTERNAL_ERROR' } })
             return
           }
 
@@ -130,8 +138,7 @@ export async function startManagedExecutionEndpoint(
             ...stored.receipt,
             outcome: 'replayed'
           }
-          res.writeHead(200, { 'Content-Type': 'application/json' })
-          res.end(JSON.stringify(replayedReceipt))
+          respondJson(res, 200, replayedReceipt)
           return
         }
 
@@ -152,21 +159,21 @@ export async function startManagedExecutionEndpoint(
           accepted_at: new Date().toISOString()
         }
 
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify(receipt))
+        respondJson(res, 400, receipt)
       } else if (error instanceof SyntaxError) {
         console.error(
           '[managed-execution] Malformed request: request_id=取得不能 layer=envelope field=request rule=json'
         )
-        res.writeHead(400, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { code: IssuerErrorCode.MALFORMED_REQUEST } }))
+        respondJson(res, 400, { error: { code: IssuerErrorCode.MALFORMED_REQUEST } })
       } else {
         console.error(`[managed-execution] Unexpected error: ${error}`)
-        res.writeHead(500, { 'Content-Type': 'application/json' })
-        res.end(JSON.stringify({ error: { code: 'INTERNAL_ERROR' } }))
+        respondJson(res, 500, { error: { code: 'INTERNAL_ERROR' } })
       }
     }
   })
+  server.headersTimeout = MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
+  server.requestTimeout = MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
+  server.setTimeout(MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS)
 
   try {
     await listenForStartup(server, port, host)
@@ -200,6 +207,16 @@ function resolvePort(configPort: number | undefined, environmentPort: string | u
 function validatePort(value: number, source: string): number {
   if (!Number.isInteger(value) || value < 0 || value > 65_535) {
     throw new Error(`${source} must be an integer between 0 and 65535`)
+  }
+  return value
+}
+
+function resolveBodyReadTimeout(value: number | undefined): number {
+  if (value === undefined) {
+    return MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    throw new Error('bodyReadTimeoutMs must be a positive integer')
   }
   return value
 }
@@ -336,11 +353,10 @@ function parseExecuteRequest(value: unknown): ExecuteRequest | null {
   return value as unknown as ExecuteRequest
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
-    req.on('error', reject)
-  })
+function respondJson(res: ServerResponse, status: number, body: unknown): void {
+  if (res.destroyed || res.writableEnded) {
+    return
+  }
+  res.writeHead(status, { 'Content-Type': 'application/json' })
+  res.end(JSON.stringify(body))
 }

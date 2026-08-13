@@ -4,11 +4,13 @@ import { spawn } from 'node:child_process'
 import * as fs from 'node:fs'
 import type { Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
+import { createConnection, type Socket } from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
 import { startManagedExecutionEndpoint } from '../endpoint'
+import { MAX_MANAGED_EXECUTION_BODY_BYTES } from '../request-body-reader'
 import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import type { ExecuteRequest } from '../issuer'
 import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
@@ -152,6 +154,30 @@ async function postRawExecute(port: number, body: string) {
   }
 }
 
+function connectToEndpoint(port: number): Promise<Socket> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: '127.0.0.1', port })
+    socket.once('connect', () => resolve(socket))
+    socket.once('error', reject)
+  })
+}
+
+function writeRequest(socket: Socket, body: string): void {
+  socket.write(
+    `POST /execute HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: ${Buffer.byteLength(body)}\r\n\r\n${body}`
+  )
+}
+
+async function waitFor(condition: () => boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+  throw new Error('Condition was not met before timeout')
+}
+
 describe('managed execution endpoint authorization path', () => {
   beforeAll(() => {
     fs.writeFileSync(
@@ -236,6 +262,112 @@ describe('managed execution endpoint authorization path', () => {
       const invalidJson = await postRawExecute(port, '{"envelope":')
       expect(invalidJson.status).toBe(400)
       expect(invalidJson.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects an oversized pre-authorization body and records only its classification', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const response = await postRawExecute(port, 'x'.repeat(MAX_MANAGED_EXECUTION_BODY_BYTES + 1))
+
+      expect(response.status).toBe(400)
+      expect(response.body).toEqual({ error: { code: 'MALFORMED_REQUEST' } })
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[managed-execution] Malformed request: request_id=取得不能 layer=transport field=body rule=maximum-bytes'
+      )
+      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain('x'.repeat(128))
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('rejects a stalled body read and records its timeout classification', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({ port: 0, bodyReadTimeoutMs: 30 })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const socket = await connectToEndpoint(port)
+      let response = ''
+      socket.on('data', (chunk: Buffer) => {
+        response += chunk.toString('utf8')
+      })
+      socket.write(
+        'POST /execute HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 1\r\n\r\n'
+      )
+
+      await waitFor(() => response.includes('400 Bad Request'))
+      expect(errorSpy).toHaveBeenCalledWith(
+        '[managed-execution] Malformed request: request_id=取得不能 layer=transport field=body rule=read-timeout'
+      )
+      socket.destroy()
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('records an aborted TCP body without writing to the closed socket', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({ port: 0 })
+    expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const socket = await connectToEndpoint(port)
+      socket.write(
+        'POST /execute HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: application/json\r\nContent-Length: 2\r\n\r\n{'
+      )
+      await new Promise((resolve) => setImmediate(resolve))
+      socket.destroy()
+
+      await waitFor(() =>
+        errorSpy.mock.calls.some(
+          ([message]) =>
+            message ===
+            '[managed-execution] Malformed request: request_id=取得不能 layer=transport field=connection rule=client-aborted'
+        )
+      )
+    } finally {
+      errorSpy.mockRestore()
+      await closeServer(server!)
+    }
+  })
+
+  it('replays the first receipt after a client disconnects on the real TCP endpoint', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    let protectedEffectCalls = 0
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      onProtectedEffect: () => {
+        protectedEffectCalls += 1
+      }
+    })
+    expect(server).not.toBeNull()
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const request = createSignedRequest()
+      const socket = await connectToEndpoint(port)
+      writeRequest(socket, JSON.stringify(request))
+      await waitFor(() => protectedEffectCalls === 1)
+      socket.destroy()
+
+      const replayed = await postExecute(port, request)
+      expect(replayed.status).toBe(200)
+      expect(replayed.receipt).toMatchObject({ outcome: 'replayed' })
+      expect(protectedEffectCalls).toBe(1)
     } finally {
       await closeServer(server!)
     }
