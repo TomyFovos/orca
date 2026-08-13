@@ -171,9 +171,9 @@ export async function startManagedExecutionEndpoint(
       }
     }
   })
-  server.headersTimeout = MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
-  server.requestTimeout = MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
-  server.setTimeout(MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS)
+  server.headersTimeout = bodyReadTimeoutMs
+  server.requestTimeout = bodyReadTimeoutMs
+  server.setTimeout(bodyReadTimeoutMs)
 
   try {
     await listenForStartup(server, port, host)
