@@ -536,6 +536,7 @@ import {
 } from './claude-agent-teams-shim-env'
 import {
   assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS,
   propagateManagedRuntimeProfile
 } from './managed-execution/authorization'
 import { assertManagedWorktreePlacement } from './managed-execution/managed-worktree-placement'
@@ -23145,7 +23146,9 @@ export class OrcaRuntimeService {
     force = false,
     runHooks = false
   ): Promise<RemoveWorktreeResult & { warning?: string }> {
-    assertManagedExecutionAuthorized('managed worktree removal')
+    assertManagedExecutionAuthorized(
+      MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedWorktreeRemoval
+    )
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -23848,7 +23851,7 @@ export class OrcaRuntimeService {
     request: RuntimeEnsureAgentSessionRequest,
     _caller: RuntimeAgentSessionRpcCaller = {}
   ): Promise<RuntimeEnsureAgentSessionResult> {
-    assertManagedExecutionAuthorized('target CLI startup')
+    assertManagedExecutionAuthorized(MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup)
     if (request.kind === 'automatic') {
       // Legacy renderer sleep records are migration evidence, not host authority.
       throw new Error('agent_session_resume_not_authorized')
@@ -23935,7 +23938,7 @@ export class OrcaRuntimeService {
     request: RuntimeCreateAgentSessionRequest,
     caller: RuntimeAgentSessionRpcCaller = {}
   ): Promise<RuntimeCreateAgentSessionResult> {
-    assertManagedExecutionAuthorized('target CLI startup')
+    assertManagedExecutionAuthorized(MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup)
     if (!this.store) {
       throw new Error('runtime_unavailable')
     }
@@ -24162,7 +24165,7 @@ export class OrcaRuntimeService {
     opts: TerminalCreateOptions = {}
   ): Promise<RuntimeTerminalCreate> {
     if (opts.launchAgent) {
-      assertManagedExecutionAuthorized('target CLI startup')
+      assertManagedExecutionAuthorized(MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup)
     }
     const presentation = resolveTerminalPresentation(opts)
     const requiresRendererFocus = opts.presentation === 'focused' || opts.focus === true
@@ -24235,7 +24238,9 @@ export class OrcaRuntimeService {
           mode: effectiveClaudeAgentTeamsMode
         })
       ) {
-        assertManagedExecutionAuthorized('Claude Agent Teams startup')
+        assertManagedExecutionAuthorized(
+          MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsStartup
+        )
       }
       const agentTeamsPlan = await buildClaudeAgentTeamsLaunchPlan({
         command: claudeAgentTeamsSourceCommand,
@@ -25877,7 +25882,9 @@ export class OrcaRuntimeService {
   async handleAgentTeamsTmuxCompat(
     request: AgentTeamsTmuxCompatRequest
   ): Promise<AgentTeamsTmuxCompatResponse> {
-    assertManagedExecutionAuthorized('Claude Agent Teams tmux compatibility')
+    assertManagedExecutionAuthorized(
+      MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsTmuxCompatibility
+    )
     return await this.claudeAgentTeams.handleTmuxCompat(request, {
       splitTerminal: (handle, opts) => this.splitTerminal(handle, opts),
       readTerminal: (handle, opts) => this.readTerminal(handle, opts),
@@ -25892,7 +25899,9 @@ export class OrcaRuntimeService {
     paneKey: string
     baseEnv?: Record<string, string>
   }): Promise<{ env: Record<string, string> }> {
-    assertManagedExecutionAuthorized('Claude Agent Teams startup')
+    assertManagedExecutionAuthorized(
+      MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsStartup
+    )
     const handle = this.getTerminalHandleForPaneKey(args.paneKey)
     if (!handle) {
       throw new Error('claude_agent_teams_requires_orca_terminal')
@@ -25907,7 +25916,9 @@ export class OrcaRuntimeService {
     handle: string
     baseEnv?: Record<string, string>
   }): Promise<{ env: Record<string, string> }> {
-    assertManagedExecutionAuthorized('Claude Agent Teams startup')
+    assertManagedExecutionAuthorized(
+      MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsStartup
+    )
     const baseEnv = {
       ...process.env,
       ...args.baseEnv

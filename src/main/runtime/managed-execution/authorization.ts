@@ -61,69 +61,93 @@ type ManagedExecutionAuthorizationRejectionDetail = Readonly<{
   rule: 'external-control-plane-authorization'
 }>
 
-const authorizationRejectionByOperation: Readonly<
-  Record<string, ManagedExecutionAuthorizationRejectionDetail>
-> = {
-  'target CLI startup': {
+export const MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS = {
+  targetCliStartup: 'target CLI startup',
+  managedWorkerStartup: 'managed worker startup',
+  automationWorkerStartup: 'automation worker startup',
+  claudeAgentTeamsStartup: 'Claude Agent Teams startup',
+  claudeAgentTeamsTmuxCompatibility: 'Claude Agent Teams tmux compatibility',
+  managedWorktreeRemoval: 'managed worktree removal',
+  orchestrationTaskOrDispatchMutation: 'orchestration task or dispatch mutation',
+  managedTaskCreation: 'managed Task creation',
+  managedTaskModification: 'managed Task modification',
+  managedDispatchCreation: 'managed Dispatch creation'
+} as const
+
+const authorizationRejectionByOperation = {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup]: {
     layer: 'authorization',
     operation: 'target-cli-startup',
     field: 'target-cli-startup',
     rule: 'external-control-plane-authorization'
   },
-  'managed worker startup': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedWorkerStartup]: {
     layer: 'authorization',
     operation: 'managed-worker-startup',
     field: 'managed-worker-startup',
     rule: 'external-control-plane-authorization'
   },
-  'automation worker startup': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.automationWorkerStartup]: {
     layer: 'authorization',
     operation: 'automation-worker-startup',
     field: 'automation-worker-startup',
     rule: 'external-control-plane-authorization'
   },
-  'Claude Agent Teams startup': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsStartup]: {
     layer: 'authorization',
     operation: 'claude-agent-teams',
     field: 'claude-agent-teams',
     rule: 'external-control-plane-authorization'
   },
-  'Claude Agent Teams tmux compatibility': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.claudeAgentTeamsTmuxCompatibility]: {
     layer: 'authorization',
     operation: 'claude-agent-teams',
     field: 'claude-agent-teams',
     rule: 'external-control-plane-authorization'
   },
-  'managed worktree removal': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedWorktreeRemoval]: {
     layer: 'authorization',
     operation: 'managed-worktree-removal',
     field: 'managed-worktree-removal',
     rule: 'external-control-plane-authorization'
   },
-  'orchestration task or dispatch mutation': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.orchestrationTaskOrDispatchMutation]: {
     layer: 'authorization',
     operation: 'task-dispatch-mutation',
     field: 'task-dispatch-mutation',
     rule: 'external-control-plane-authorization'
   },
-  'managed Task creation': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedTaskCreation]: {
     layer: 'authorization',
     operation: 'task-dispatch-mutation',
     field: 'task-dispatch-mutation',
     rule: 'external-control-plane-authorization'
   },
-  'managed Task modification': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedTaskModification]: {
     layer: 'authorization',
     operation: 'task-dispatch-mutation',
     field: 'task-dispatch-mutation',
     rule: 'external-control-plane-authorization'
   },
-  'managed Dispatch creation': {
+  [MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedDispatchCreation]: {
     layer: 'authorization',
     operation: 'task-dispatch-mutation',
     field: 'task-dispatch-mutation',
     rule: 'external-control-plane-authorization'
   }
+} satisfies Readonly<
+  Record<
+    (typeof MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS)[keyof typeof MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS],
+    ManagedExecutionAuthorizationRejectionDetail
+  >
+>
+
+export type ManagedExecutionAuthorizedOperation = keyof typeof authorizationRejectionByOperation
+
+export function isManagedExecutionAuthorizedOperation(
+  operation: string
+): operation is ManagedExecutionAuthorizedOperation {
+  return Object.prototype.hasOwnProperty.call(authorizationRejectionByOperation, operation)
 }
 
 function logManagedExecutionAuthorizationRejection(operation: string): void {
@@ -164,6 +188,24 @@ export class ManagedExecutionAuthorizationRequiredError extends Error {
 }
 
 export function assertManagedExecutionAuthorized(
+  operation: ManagedExecutionAuthorizedOperation,
+  authorization?: unknown
+): asserts authorization is ManagedExecutionAuthorization {
+  assertManagedExecutionAuthorization(operation, authorization)
+}
+
+export function assertExternalManagedExecutionAuthorized(
+  operation: string,
+  authorization?: unknown
+): asserts authorization is ManagedExecutionAuthorization {
+  if (isManagedExecutionAuthorizedOperation(operation)) {
+    assertManagedExecutionAuthorized(operation, authorization)
+    return
+  }
+  assertManagedExecutionAuthorization(operation, authorization)
+}
+
+function assertManagedExecutionAuthorization(
   operation: string,
   authorization?: unknown
 ): asserts authorization is ManagedExecutionAuthorization {

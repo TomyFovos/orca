@@ -17,7 +17,10 @@ import {
 } from '../../../../shared/agent-session-host-authority'
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import { isValidTerminalTabId } from '../../../../shared/terminal-tab-id'
-import { assertManagedExecutionAuthorized } from '../../managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from '../../managed-execution/authorization'
 import type { OrcaRuntimeService } from '../../orca-runtime'
 import { defineMethod, type RpcAnyMethod } from '../core'
 
@@ -239,7 +242,7 @@ export const AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'terminal.ensureAgentSession',
     params: EnsureAgentSessionParams,
     handler: (params, { runtime, pairedDeviceId, clientId, clientKind, signal }) => {
-      assertManagedExecutionAuthorized('target CLI startup')
+      assertManagedExecutionAuthorized(MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup)
       return (runtime as AgentSessionRuntime).ensureAgentSession(
         withExecutionHostAgentPresentation(params, clientKind),
         callerContext(pairedDeviceId ?? clientId, clientKind, signal)
@@ -250,7 +253,7 @@ export const AGENT_SESSION_METHODS: RpcAnyMethod[] = [
     name: 'terminal.createAgentSession',
     params: CreateAgentSessionParams,
     handler: (params, { runtime, pairedDeviceId, clientId, clientKind, signal }) => {
-      assertManagedExecutionAuthorized('target CLI startup')
+      assertManagedExecutionAuthorized(MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup)
       assertOperationTimestampWithinFutureSkew(params.clientOperationId)
       return (runtime as AgentSessionRuntime).createAgentSession(
         withExecutionHostAgentPresentation(params, clientKind),

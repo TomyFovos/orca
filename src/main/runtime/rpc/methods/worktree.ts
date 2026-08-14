@@ -7,7 +7,10 @@ import { buildCliWorkspaceProvenance } from '../../../../shared/cli-workspace-pr
 import { defineMethod, type RpcMethod } from '../core'
 import { resolveWorktreeCatalogSnapshot } from '../worktree-catalog-snapshot'
 import { resolveRuntimeNavigationTarget } from '../../../../shared/runtime-navigation'
-import { assertManagedExecutionAuthorized } from '../../managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from '../../managed-execution/authorization'
 import {
   WorktreeCreate,
   WorktreeDetectedListParams,
@@ -99,7 +102,9 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     params: WorktreeCreate,
     handler: async (params, { runtime }) => {
       if (params.startupAgent || params.startupCommand) {
-        assertManagedExecutionAuthorized('target CLI startup')
+        assertManagedExecutionAuthorized(
+          MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup
+        )
       }
       return (
         // Why: a mobile create interrupted by a connection migration is retried with
@@ -282,7 +287,9 @@ export const WORKTREE_METHODS: RpcMethod[] = [
     name: 'worktree.rm',
     params: WorktreeRemove,
     handler: async (params, { runtime }) => {
-      assertManagedExecutionAuthorized('managed worktree removal')
+      assertManagedExecutionAuthorized(
+        MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.managedWorktreeRemoval
+      )
       const result = await runtime.removeManagedWorktree(
         params.worktree,
         params.force === true,

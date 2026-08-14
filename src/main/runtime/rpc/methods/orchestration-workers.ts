@@ -1,6 +1,9 @@
 import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
-import { assertManagedExecutionAuthorized } from '../../managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from '../../managed-execution/authorization'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { defineMethod, type RpcMethod } from '../core'
@@ -22,12 +25,13 @@ import {
 } from './orchestration-worker-setup-gate'
 import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
 
+const { managedWorkerStartup } = MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
 export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
   defineMethod({
     name: 'orchestration.workerStart',
     params: WorkerStartParams,
     handler: async (params, { runtime, orchestrationMutation }) => {
-      assertManagedExecutionAuthorized('managed worker startup')
+      assertManagedExecutionAuthorized(managedWorkerStartup)
       const db = runtime.getOrchestrationDb()
       const coordinatorPane = runtime.getTerminalPaneKey(params.from)
       const run = coordinatorPane ? db.getCurrentRunForPane(coordinatorPane) : undefined

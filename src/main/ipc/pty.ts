@@ -15,6 +15,7 @@ export { getBashShellReadyRcfileContent } from '../providers/local-pty-shell-rea
 import type { OrcaRuntimeService } from '../runtime/orca-runtime'
 import {
   assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS,
   propagateManagedRuntimeProfile
 } from '../runtime/managed-execution/authorization'
 import type { Store } from '../persistence'
@@ -4932,7 +4933,9 @@ export function registerPtyHandlers(
       if (isTuiAgent(args.launchAgent)) {
         // Why: raw terminal commands remain available, but structured agent starts
         // must originate from a future external-control-plane authorization.
-        assertManagedExecutionAuthorized('target CLI startup')
+        assertManagedExecutionAuthorized(
+          MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.targetCliStartup
+        )
       }
       const spawnTiming = createPtySpawnTiming()
       const startupPromise = getLocalPtyStartupPromise(args.connectionId)

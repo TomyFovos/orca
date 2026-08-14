@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto'
 import { isOrchestrationMutation } from '../../../shared/orchestration-rpc-contract'
-import { assertManagedExecutionAuthorized } from '../managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from '../managed-execution/authorization'
 import type { OrcaRuntimeService } from '../orca-runtime'
 import { OrchestrationError } from '../orchestration/orchestration-error'
 import type { RpcRequest } from './core'
@@ -31,7 +34,9 @@ export class OrchestrationMutationExecutor {
     if (isMutation) {
       // Why: caller metadata is serializable, so only a future process-local
       // external-control-plane capability may authorize managed mutations.
-      assertManagedExecutionAuthorized('orchestration task or dispatch mutation')
+      assertManagedExecutionAuthorized(
+        MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.orchestrationTaskOrDispatchMutation
+      )
     }
     if (!requestId || !isMutation) {
       return await invoke()
