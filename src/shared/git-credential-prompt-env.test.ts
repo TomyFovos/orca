@@ -129,4 +129,31 @@ describe('gitCredentialPromptGuardEnv', () => {
     )
     expect(guarded.WSLENV).not.toContain('GIT_CONFIG_')
   })
+
+  it('keeps a valid indexed config protocol in win32 WSLENV', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+    const guarded = gitCredentialPromptGuardEnv(
+      {
+        GIT_CONFIG_COUNT: '1',
+        GIT_CONFIG_KEY_0: 'safe.directory',
+        GIT_CONFIG_VALUE_0: '/repo'
+      },
+      'win32'
+    )
+
+    expect(guarded.WSLENV?.split(':')).toEqual(
+      expect.arrayContaining([
+        'GIT_TERMINAL_PROMPT',
+        'GCM_INTERACTIVE',
+        'GIT_CONFIG_COUNT',
+        'GIT_CONFIG_KEY_0',
+        'GIT_CONFIG_VALUE_0',
+        'GIT_CONFIG_KEY_1',
+        'GIT_CONFIG_VALUE_1',
+        'GIT_CONFIG_KEY_2',
+        'GIT_CONFIG_VALUE_2'
+      ])
+    )
+    expect(warn).not.toHaveBeenCalled()
+  })
 })
