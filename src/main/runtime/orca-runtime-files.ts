@@ -1276,7 +1276,7 @@ export class RuntimeFileCommands {
     )
     // Why: relay I/O follows symlinks, so re-canonicalize a remote temp-artifact grant after the process can mutate it.
     if (allowedPath !== grant.absolutePath) {
-      throw new Error('terminal_file_grant_stale')
+      throw terminalFileGrantStaleError('remote_real_path', 'matches_grant')
     }
     return provider
   }
@@ -2302,7 +2302,7 @@ async function readLocalTerminalArtifactPreviewFromHandle(
 async function assertLocalTerminalArtifactPathStillCanonical(filePath: string): Promise<void> {
   const currentPath = await canonicalPathForArtifactComparison(filePath)
   if (currentPath !== filePath) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalFileGrantStaleError('local_real_path', 'matches_grant')
   }
 }
 
@@ -2315,7 +2315,7 @@ async function openLocalTerminalArtifactGrant(
     return await open(grant.absolutePath, flags | OPEN_NOFOLLOW)
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error('terminal_file_grant_stale')
+      throw terminalFileGrantStaleError('local_open', 'no_symlink')
     }
     throw error
   }
@@ -2459,15 +2459,18 @@ async function getLocalTerminalArtifactSnapshot(
   const handle = await open(absolutePath, constants.O_RDONLY | OPEN_NOFOLLOW)
   try {
     const stats = await handle.stat()
-    if (stats.isDirectory() || stats.size > terminalArtifactDigestLimit(absolutePath)) {
-      throw new Error('terminal_file_grant_stale')
+    if (stats.isDirectory()) {
+      throw terminalFileGrantStaleError('artifact_type', 'regular_file')
+    }
+    if (stats.size > terminalArtifactDigestLimit(absolutePath)) {
+      throw terminalFileGrantStaleError('stat_size', 'within_digest_limit')
     }
     const content = await readFileHandleBufferBounded(
       handle,
       terminalArtifactDigestLimit(absolutePath) + 1
     )
     if (content.byteLength > terminalArtifactDigestLimit(absolutePath)) {
-      throw new Error('terminal_file_grant_stale')
+      throw terminalFileGrantStaleError('content_size', 'within_digest_limit')
     }
     return {
       stats,
@@ -2475,7 +2478,7 @@ async function getLocalTerminalArtifactSnapshot(
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
-      throw new Error('terminal_file_grant_stale')
+      throw terminalFileGrantStaleError('snapshot_open', 'no_symlink')
     }
     throw error
   } finally {
@@ -2510,13 +2513,13 @@ function assertTerminalFileGrantFresh(grant: TerminalFileGrant, stats: RuntimeFi
   assertTerminalArtifactNotHardLinked(stats)
   const nextIdentity = terminalFileStatIdentity(stats)
   if (grant.statIdentity !== null && nextIdentity !== null && grant.statIdentity !== nextIdentity) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalFileGrantStaleError('stat_identity', 'matches_grant')
   }
 }
 
 function assertTerminalArtifactNotHardLinked(stats: RuntimeFileStatLike): void {
   if (isTerminalArtifactHardLinked(stats)) {
-    throw new Error('terminal_file_grant_stale')
+    throw terminalFileGrantStaleError('link_count', 'exactly_one')
   }
 }
 
