@@ -1,5 +1,5 @@
 import { execFile, spawn } from 'node:child_process'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as ChildProcess from 'node:child_process'
 import { createFakeChild, createHandlers, requestContext } from './agent-exec-handler-test-harness'
 import { TERMINAL_GIT_CREDENTIAL_GUARD_POLICY_ENV } from '../shared/terminal-git-credential-guard'
@@ -16,12 +16,33 @@ vi.mock('child_process', async (importOriginal) => {
 const spawnMock = vi.mocked(spawn)
 const execFileMock = vi.mocked(execFile)
 
+const GIT_CREDENTIAL_ENV_KEY_RE =
+  /^(?:GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+)|GIT_ASKPASS|SSH_ASKPASS)$/
+let inheritedGitCredentialEnv: Record<string, string | undefined> = {}
+
 type AgentExecResult = { exitCode: number | null; timedOut: boolean }
 
 describe('AgentExecHandler', () => {
   beforeEach(() => {
     spawnMock.mockReset()
     execFileMock.mockReset()
+    inheritedGitCredentialEnv = Object.fromEntries(
+      Object.keys(process.env)
+        .filter((key) => GIT_CREDENTIAL_ENV_KEY_RE.test(key))
+        .map((key) => [key, process.env[key]])
+    )
+    for (const key of Object.keys(inheritedGitCredentialEnv)) {
+      delete process.env[key]
+    }
+  })
+
+  afterEach(() => {
+    for (const key of Object.keys(process.env)) {
+      if (GIT_CREDENTIAL_ENV_KEY_RE.test(key)) {
+        delete process.env[key]
+      }
+    }
+    Object.assign(process.env, inheritedGitCredentialEnv)
   })
 
   it('executes a non-interactive command with captured output and stdin', async () => {
@@ -53,13 +74,20 @@ describe('AgentExecHandler', () => {
     })
     expect(spawnMock).toHaveBeenCalledWith('agent', ['--flag', '42'], {
       cwd: '/repo',
-      env: expect.objectContaining({
-        ...process.env,
-        GIT_TERMINAL_PROMPT: '0',
-        GCM_INTERACTIVE: 'never'
-      }),
+      env: expect.any(Object),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
+    })
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      GIT_ASKPASS: '',
+      SSH_ASKPASS: '',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'credential.interactive',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_CONFIG_KEY_1: 'credential.guiPrompt',
+      GIT_CONFIG_VALUE_1: 'false'
     })
     expect(child.stdin.end).toHaveBeenCalledWith('PROMPT')
   })
@@ -92,13 +120,22 @@ describe('AgentExecHandler', () => {
     })
     expect(spawnMock).toHaveBeenCalledWith('codex', ['exec'], {
       cwd: '/repo',
-      env: expect.objectContaining({
-        ...process.env,
-        CODEX_HOME: '/managed/codex-home',
-        PATH: '/managed/bin'
-      }),
+      env: expect.any(Object),
       stdio: ['pipe', 'pipe', 'pipe'],
       windowsHide: true
+    })
+    expect(spawnMock.mock.calls[0]?.[2]?.env).toMatchObject({
+      CODEX_HOME: '/managed/codex-home',
+      PATH: '/managed/bin',
+      GIT_TERMINAL_PROMPT: '0',
+      GCM_INTERACTIVE: 'never',
+      GIT_ASKPASS: '',
+      SSH_ASKPASS: '',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'credential.interactive',
+      GIT_CONFIG_VALUE_0: 'false',
+      GIT_CONFIG_KEY_1: 'credential.guiPrompt',
+      GIT_CONFIG_VALUE_1: 'false'
     })
   })
 
