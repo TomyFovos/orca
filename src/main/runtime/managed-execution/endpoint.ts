@@ -80,8 +80,7 @@ export async function startManagedExecutionEndpoint(
       // 検証と capability mint
       const authorization = mintAuthorization(envelope)
 
-      // 保護された効果を実行（この例では何もしない）
-      // 実際には operation に応じた処理を行う
+      // 保護された効果を実行。実装は設定された managed runtime callback に委譲する。
       assertManagedExecutionAuthorized(envelope.binding.operation, authorization)
       config.onProtectedEffect?.(envelope.payload)
 
