@@ -79,11 +79,9 @@ describe('AI-DE 共有署名ベクタの endpoint 経路', () => {
       const port = (server!.address() as AddressInfo).port
       const response = await postEnvelope(port, JSON.stringify(vector.envelope))
 
-      // 形状の拒否でも署名の拒否でもないことを、まず個別に示す。
       expect(response.body).not.toMatchObject({ error: { code: 'MALFORMED_REQUEST' } })
       expect(response.body).not.toMatchObject({ reject_reason: 'INVALID_SIGNATURE' })
       expect(response.body).not.toMatchObject({ reject_reason: 'PAYLOAD_DIGEST_MISMATCH' })
-
       expect(response.status).toBe(200)
       expect(response.body).toMatchObject({
         schema: 'ai-de.execution-receipt/1',

@@ -75,6 +75,8 @@ import {
 import { assertManagedExecutionAuthorized } from './runtime/managed-execution/authorization'
 import { isAuthorityRegistryLoaded } from './runtime/managed-execution/authority-registry'
 import { startManagedExecutionEndpoint } from './runtime/managed-execution/endpoint'
+import { IssuerError, IssuerErrorCode } from './runtime/managed-execution/issuer'
+import { runManagedWorkerForProtectedEffect } from './runtime/managed-execution/worker-effect'
 import { loadAgentSessionClaimSigner } from './runtime/agent-session-claim-identity'
 import {
   fingerprintOrchestrationPeer,
@@ -393,9 +395,15 @@ const managedAuthorityRegistryLoaded =
 let managedExecutionEndpoint: Server | null = null
 
 function handleManagedExecutionProtectedEffect(payload: Record<string, unknown>): void {
-  console.log(
-    `[managed-execution] Protected effect executed: payload_fields=${Object.keys(payload).length}`
-  )
+  const result = runManagedWorkerForProtectedEffect(payload)
+  if (!result.execution_allowed) {
+    throw new IssuerError(
+      IssuerErrorCode.PROTECTED_EFFECT_REFUSED,
+      'AI-DE worker refused protected effect execution',
+      result.refusal
+    )
+  }
+  console.log(`[managed-execution] Protected effect executed: status=${result.status}`)
 }
 
 async function startManagedExecutionEndpointIfConfigured(): Promise<void> {
