@@ -45,7 +45,7 @@ export function resolveManagedExecutionResponseSocketIdleTimeout(
 
 function onSocketIdleTimeout(socket: Socket): void {
   console.error(
-    '[managed-execution] Socket timeout: request_id=取得不能 layer=transport field=connection rule=socket-idle-timeout'
+    '[managed-execution] Socket timeout: request_id=null unresolved_fields=request_id layer=transport field=connection rule=socket-idle-timeout'
   )
   socket.destroy()
 }
