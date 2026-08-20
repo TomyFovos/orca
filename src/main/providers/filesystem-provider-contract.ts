@@ -19,8 +19,15 @@ export type FileReadResult = {
 }
 
 export type TerminalArtifactSnapshot = {
-  stat: FileStat
+  stat: TerminalArtifactFileStat
   contentDigest: string
+}
+
+export type TerminalArtifactFileStat = FileStat & {
+  mtimeMs: number
+  dev: number
+  ino: number
+  nlink: number
 }
 
 export type IFilesystemProvider = {
@@ -32,7 +39,7 @@ export type IFilesystemProvider = {
   ): Promise<FileReadResult>
   getTerminalArtifactSnapshot?(
     filePath: string,
-    options: TerminalArtifactAccessOptions
+    options: TerminalArtifactSnapshotOptions
   ): Promise<TerminalArtifactSnapshot>
   downloadFile?(sourcePath: string, destinationPath: string): Promise<void>
   downloadFolder?: (src: string, dest: string, options?: { signal?: AbortSignal }) => Promise<void>
@@ -43,7 +50,7 @@ export type IFilesystemProvider = {
     filePath: string,
     content: string,
     options: TerminalArtifactAccessOptions
-  ): Promise<FileStat>
+  ): Promise<TerminalArtifactFileStat>
   writeFileBase64(filePath: string, contentBase64: string): Promise<void>
   writeFileBase64Chunk(filePath: string, contentBase64: string, append: boolean): Promise<void>
   stat(filePath: string): Promise<FileStat>
@@ -82,9 +89,16 @@ export type FileUploadSession = {
   close(): void
 }
 
-export type TerminalArtifactAccessOptions = {
+export type TerminalArtifactAccessOptions = Omit<
+  TerminalArtifactSnapshotOptions,
+  'expectedStatIdentity'
+> & {
+  expectedStatIdentity: string
+  expectedContentDigest: string
+}
+
+export type TerminalArtifactSnapshotOptions = {
   expectedRealPath: string
   expectedStatIdentity: string | null
-  expectedContentDigest?: string | null
   maxBytes: number
 }

@@ -25,15 +25,18 @@ type TerminalArtifactStat = {
 type VerifiedTerminalArtifactOptions = {
   expectedRealPath: string
   expectedStatIdentity?: string | null
-  expectedContentDigest?: string | null
   maxBytes?: number
+}
+
+type VerifiedTerminalArtifactAccessOptions = VerifiedTerminalArtifactOptions & {
+  expectedContentDigest: string
 }
 
 const OPEN_NOFOLLOW = typeof constants.O_NOFOLLOW === 'number' ? constants.O_NOFOLLOW : 0
 
 export async function readVerifiedTerminalArtifact(params: Record<string, unknown>) {
   const filePath = stringParam(params.filePath)
-  const options = verifiedTerminalArtifactOptions(params)
+  const options = verifiedTerminalArtifactAccessOptions(params)
   const handle = await openVerifiedTerminalArtifact(filePath, options, constants.O_RDONLY)
   try {
     await verifiedHandleStat(handle, options)
@@ -43,7 +46,7 @@ export async function readVerifiedTerminalArtifact(params: Record<string, unknow
       mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
     )
     const buffer = await readBoundedFileFromHandle(handle, sizeLimit)
-    assertTerminalArtifactContentDigest(options.expectedContentDigest ?? null, buffer)
+    assertTerminalArtifactContentDigest(options.expectedContentDigest, buffer)
     if (mimeType) {
       return { content: buffer.toString('base64'), isBinary: true, isImage: true, mimeType }
     }
@@ -74,7 +77,7 @@ export async function writeVerifiedTerminalArtifact(
 ): Promise<{ ok: true; stat: TerminalArtifactStat }> {
   const filePath = stringParam(params.filePath)
   const content = stringParam(params.content)
-  const options = verifiedTerminalArtifactOptions(params)
+  const options = verifiedTerminalArtifactAccessOptions(params)
   // Why: maxBytes is client-supplied; clamp before it sizes buffer allocations.
   const writeLimit = Math.min(options.maxBytes ?? MAX_TEXT_FILE_SIZE, MAX_TEXT_FILE_SIZE)
   if (Buffer.byteLength(content, 'utf8') > writeLimit) {
@@ -85,7 +88,7 @@ export async function writeVerifiedTerminalArtifact(
   try {
     originalMode = (await verifiedHandleStat(handle, options)).mode ?? null
     const existing = await readBoundedFileFromHandle(handle, writeLimit)
-    assertTerminalArtifactContentDigest(options.expectedContentDigest ?? null, existing)
+    assertTerminalArtifactContentDigest(options.expectedContentDigest, existing)
     if (isBinaryBuffer(existing)) {
       throw new Error('binary_file')
     }
@@ -206,21 +209,19 @@ function terminalArtifactStatIdentity(stats: {
   mtime?: number | Date
   mtimeMs?: number
 }): string | null {
-  const dev = typeof stats.dev === 'number' ? stats.dev : null
-  const ino = typeof stats.ino === 'number' ? stats.ino : null
-  const nlink = typeof stats.nlink === 'number' ? stats.nlink : null
-  const size = typeof stats.size === 'number' ? stats.size : null
+  const dev = typeof stats.dev === 'number' && Number.isFinite(stats.dev) ? stats.dev : null
+  const ino = typeof stats.ino === 'number' && Number.isFinite(stats.ino) ? stats.ino : null
+  const nlink = typeof stats.nlink === 'number' && Number.isFinite(stats.nlink) ? stats.nlink : null
+  const size = typeof stats.size === 'number' && Number.isFinite(stats.size) ? stats.size : null
   const mtimeMs =
-    typeof stats.mtimeMs === 'number'
+    typeof stats.mtimeMs === 'number' && Number.isFinite(stats.mtimeMs)
       ? stats.mtimeMs
-      : typeof stats.mtime === 'number'
+      : typeof stats.mtime === 'number' && Number.isFinite(stats.mtime)
         ? stats.mtime
         : null
-  if (dev !== null && ino !== null && size !== null && mtimeMs !== null) {
-    return `${dev}:${ino}:${nlink ?? 'unknown'}:${size}:${mtimeMs}`
-  }
-  if (size !== null && mtimeMs !== null) {
-    return `${size}:${mtimeMs}`
+  // Why: agents may bypass their sandbox; relay freshness must reject metadata it cannot verify.
+  if (dev !== null && ino !== null && nlink !== null && size !== null && mtimeMs !== null) {
+    return `${dev}:${ino}:${nlink}:${size}:${mtimeMs}`
   }
   return null
 }
@@ -235,25 +236,31 @@ function assertTerminalArtifactStatIdentity(
   expectedStatIdentity: string | null,
   stats: TerminalArtifactStat
 ): void {
+  if (expectedStatIdentity === null) {
+    throw terminalArtifactStaleError('relay_stat_identity', 'complete_identity_required')
+  }
+  if (!isCompleteTerminalArtifactStatIdentity(expectedStatIdentity)) {
+    throw terminalArtifactStaleError('relay_stat_identity_format', 'complete_identity_required')
+  }
   const nextIdentity = terminalArtifactStatIdentity(stats)
-  if (
-    expectedStatIdentity !== null &&
-    nextIdentity !== null &&
-    expectedStatIdentity !== nextIdentity
-  ) {
+  if (nextIdentity === null) {
+    throw terminalArtifactStaleError('relay_stat_identity', 'complete_identity_required')
+  }
+  if (expectedStatIdentity !== nextIdentity) {
     throw terminalArtifactStaleError('relay_stat_identity', 'matches_grant')
   }
+}
+
+function isCompleteTerminalArtifactStatIdentity(identity: string): boolean {
+  return identity.split(':').length === 5
 }
 
 function terminalArtifactContentDigest(content: Buffer): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-function assertTerminalArtifactContentDigest(expectedContentDigest: string | null, content: Buffer): void {
-  if (
-    expectedContentDigest !== null &&
-    expectedContentDigest !== terminalArtifactContentDigest(content)
-  ) {
+function assertTerminalArtifactContentDigest(expectedContentDigest: string, content: Buffer): void {
+  if (expectedContentDigest !== terminalArtifactContentDigest(content)) {
     throw terminalArtifactStaleError('content_digest', 'sha256_match')
   }
 }
@@ -277,12 +284,22 @@ function verifiedTerminalArtifactOptions(
     expectedRealPath: stringParam(params.expectedRealPath),
     expectedStatIdentity:
       typeof params.expectedStatIdentity === 'string' ? params.expectedStatIdentity : null,
-    expectedContentDigest:
-      typeof params.expectedContentDigest === 'string' ? params.expectedContentDigest : null,
     maxBytes:
       typeof params.maxBytes === 'number' && Number.isFinite(params.maxBytes)
         ? Math.max(0, Math.floor(params.maxBytes))
         : undefined
+  }
+}
+
+function verifiedTerminalArtifactAccessOptions(
+  params: Record<string, unknown>
+): VerifiedTerminalArtifactAccessOptions {
+  if (typeof params.expectedContentDigest !== 'string') {
+    throw terminalArtifactStaleError('content_digest', 'sha256_required')
+  }
+  return {
+    ...verifiedTerminalArtifactOptions(params),
+    expectedContentDigest: params.expectedContentDigest
   }
 }
 

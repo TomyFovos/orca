@@ -159,6 +159,7 @@ describe('SshFilesystemProvider', () => {
         provider.writeTerminalArtifact('/tmp/result.json', '{}', {
           expectedRealPath: '/tmp/result.json',
           expectedStatIdentity: '1:2:3:4',
+          expectedContentDigest: 'digest',
           maxBytes: 1024
         })
       ).rejects.toThrow('Reconnect the SSH target')

@@ -17,10 +17,12 @@ import {
 import type {
   IFilesystemProvider,
   FileStat,
+  TerminalArtifactFileStat,
   FileReadResult,
   FileUploadSession,
   TerminalArtifactSnapshot,
-  TerminalArtifactAccessOptions
+  TerminalArtifactAccessOptions,
+  TerminalArtifactSnapshotOptions
 } from './types'
 import type { DirEntry, FsChangeEvent, SearchOptions, SearchResult } from '../../shared/types'
 import { routeSshFilesystemWatchNotification } from './ssh-filesystem-watch-notifications'
@@ -134,14 +136,13 @@ export class SshFilesystemProvider implements IFilesystemProvider {
 
   async getTerminalArtifactSnapshot(
     filePath: string,
-    options: TerminalArtifactAccessOptions
+    options: TerminalArtifactSnapshotOptions
   ): Promise<TerminalArtifactSnapshot> {
     try {
       return (await this.mux.request('fs.getTerminalArtifactSnapshot', {
         filePath,
         expectedRealPath: options.expectedRealPath,
         expectedStatIdentity: options.expectedStatIdentity,
-        expectedContentDigest: options.expectedContentDigest,
         maxBytes: options.maxBytes
       })) as TerminalArtifactSnapshot
     } catch (err) {
@@ -189,8 +190,8 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     filePath: string,
     content: string,
     options: TerminalArtifactAccessOptions
-  ): Promise<FileStat> {
-    let result: { stat?: FileStat }
+  ): Promise<TerminalArtifactFileStat> {
+    let result: { stat?: TerminalArtifactFileStat }
     try {
       result = (await this.mux.request('fs.writeTerminalArtifact', {
         filePath,
@@ -199,7 +200,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
         expectedStatIdentity: options.expectedStatIdentity,
         expectedContentDigest: options.expectedContentDigest,
         maxBytes: options.maxBytes
-      })) as { stat?: FileStat }
+      })) as { stat?: TerminalArtifactFileStat }
     } catch (err) {
       if (isMethodNotFoundError(err)) {
         throw new Error(

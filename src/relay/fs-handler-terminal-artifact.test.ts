@@ -58,6 +58,10 @@ function statIdentity(stats: {
   return `${stats.dev}:${stats.ino}:${stats.nlink ?? 'unknown'}:${stats.size}:${stats.mtimeMs}`
 }
 
+function terminalArtifactDigest(content: string): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
 describe('terminal artifact relay handlers', () => {
   let dispatcher: ReturnType<typeof createMockDispatcher>
   let handler: FsHandler
@@ -89,6 +93,7 @@ describe('terminal artifact relay handlers', () => {
         filePath,
         expectedRealPath: await fs.realpath(filePath),
         expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
         maxBytes: 512 * 1024
       })
     ).resolves.toEqual({ content: '{"ok":true}', isBinary: false })
@@ -104,7 +109,7 @@ describe('terminal artifact relay handlers', () => {
         filePath,
         expectedRealPath: await fs.realpath(filePath),
         expectedStatIdentity: statIdentity(stats),
-        expectedContentDigest: createHash('sha256').update('{"ok":true}').digest('hex'),
+        expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
         maxBytes: 512 * 1024
       })
     ).rejects.toMatchObject({
@@ -112,6 +117,26 @@ describe('terminal artifact relay handlers', () => {
       layer: 'terminal_artifact_grant',
       field: 'content_digest',
       rule: 'sha256_match'
+    })
+  })
+
+  it('rejects terminal artifact reads that omit the expected content digest', async () => {
+    const filePath = path.join(tmpDir, 'artifact-missing-digest.json')
+    writeFileSync(filePath, '{"ok":true}')
+    const stats = await fs.stat(filePath)
+
+    await expect(
+      dispatcher.callRequest('fs.readTerminalArtifact', {
+        filePath,
+        expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        maxBytes: 512 * 1024
+      })
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'content_digest',
+      rule: 'sha256_required'
     })
   })
 
@@ -125,6 +150,7 @@ describe('terminal artifact relay handlers', () => {
         filePath,
         expectedRealPath: await fs.realpath(filePath),
         expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('<svg><text>ok</text></svg>'),
         maxBytes: 512 * 1024
       })
     ).resolves.toEqual({ content: '<svg><text>ok</text></svg>', isBinary: false })
@@ -133,11 +159,14 @@ describe('terminal artifact relay handlers', () => {
   it('rejects content beyond the requested byte limit', async () => {
     const filePath = path.join(tmpDir, 'artifact-read-too-large.txt')
     writeFileSync(filePath, 'abcdef')
+    const stats = await fs.stat(filePath)
 
     await expect(
       dispatcher.callRequest('fs.readTerminalArtifact', {
         filePath,
         expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('abcdef'),
         maxBytes: 5
       })
     ).rejects.toThrow('file_too_large')
@@ -153,6 +182,7 @@ describe('terminal artifact relay handlers', () => {
       content: '{"ok":false}',
       expectedRealPath: await fs.realpath(filePath),
       expectedStatIdentity: statIdentity(stats),
+      expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
       maxBytes: 512 * 1024
     })) as { stat: { type: string; size: number } }
 
@@ -173,6 +203,7 @@ describe('terminal artifact relay handlers', () => {
         content: '#!/bin/sh\necho changed\n',
         expectedRealPath: await fs.realpath(filePath),
         expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('#!/bin/sh\necho ok\n'),
         maxBytes: 512 * 1024
       })
 
@@ -183,12 +214,15 @@ describe('terminal artifact relay handlers', () => {
   it('rejects oversized existing content before writing', async () => {
     const filePath = path.join(tmpDir, 'artifact-write-too-large.txt')
     writeFileSync(filePath, 'abcdef')
+    const stats = await fs.stat(filePath)
 
     await expect(
       dispatcher.callRequest('fs.writeTerminalArtifact', {
         filePath,
         content: 'ok',
         expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('abcdef'),
         maxBytes: 5
       })
     ).rejects.toThrow('file_too_large')
@@ -198,12 +232,15 @@ describe('terminal artifact relay handlers', () => {
   it('clamps client-supplied write limits', async () => {
     const filePath = path.join(tmpDir, 'artifact-write-clamp.txt')
     writeFileSync(filePath, 'abcdef')
+    const stats = await fs.stat(filePath)
 
     await expect(
       dispatcher.callRequest('fs.writeTerminalArtifact', {
         filePath,
         content: 'a'.repeat(10 * 1024 * 1024 + 1),
         expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('abcdef'),
         maxBytes: Number.MAX_SAFE_INTEGER
       })
     ).rejects.toThrow('file_too_large')
@@ -226,6 +263,7 @@ describe('terminal artifact relay handlers', () => {
         content: '{"ok":false}',
         expectedRealPath,
         expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
         maxBytes: 512 * 1024
       })
     ).rejects.toMatchObject({
@@ -250,6 +288,7 @@ describe('terminal artifact relay handlers', () => {
         content: '{"ok":false}',
         expectedRealPath: await fs.realpath(filePath),
         expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('{"secret":true}'),
         maxBytes: 512 * 1024
       })
     ).rejects.toMatchObject({
@@ -269,7 +308,7 @@ describe('terminal artifact relay handlers', () => {
       getVerifiedTerminalArtifactSnapshot({
         filePath,
         expectedRealPath: await fs.realpath(filePath),
-        expectedStatIdentity: 'different',
+        expectedStatIdentity: '0:0:1:0:0',
         maxBytes: 512 * 1024
       })
     ).rejects.toMatchObject({
@@ -280,14 +319,72 @@ describe('terminal artifact relay handlers', () => {
     })
   })
 
+  it('records weak relay stat identities as stale', async () => {
+    const filePath = path.join(tmpDir, 'artifact-weak-stat.json')
+    writeFileSync(filePath, '{"ok":true}')
+
+    await expect(
+      getVerifiedTerminalArtifactSnapshot({
+        filePath,
+        expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: '11:3',
+        maxBytes: 512 * 1024
+      })
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'relay_stat_identity_format',
+      rule: 'complete_identity_required'
+    })
+  })
+
+  it('records relay stat fields that cannot form a complete identity', async () => {
+    const filePath = path.join(tmpDir, 'artifact-incomplete-stat.json')
+    writeFileSync(filePath, '{"ok":true}')
+    const stats = await fs.stat(filePath)
+    const handle = await fs.open(filePath, 'r')
+    const handleStat = handle.stat.bind(handle)
+    openMock.mockResolvedValue(
+      Object.assign(handle, {
+        stat: async () => {
+          const nextStats = await handleStat()
+          Object.defineProperty(nextStats, 'nlink', { value: undefined })
+          return nextStats
+        }
+      })
+    )
+
+    await expect(
+      readVerifiedTerminalArtifact({
+        filePath,
+        expectedRealPath: await fs.realpath(filePath),
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
+        maxBytes: 512 * 1024
+      })
+    ).rejects.toMatchObject({
+      message: 'terminal_file_grant_stale',
+      layer: 'terminal_artifact_grant',
+      field: 'relay_stat_identity',
+      rule: 'complete_identity_required'
+    })
+  })
+
   it('records relay symlink-open races', async () => {
     const filePath = path.join(tmpDir, 'artifact-open-race.json')
     writeFileSync(filePath, '{"ok":true}')
     const expectedRealPath = await fs.realpath(filePath)
+    const stats = await fs.stat(filePath)
     openMock.mockRejectedValueOnce(Object.assign(new Error('ELOOP'), { code: 'ELOOP' }))
 
     await expect(
-      readVerifiedTerminalArtifact({ filePath, expectedRealPath, maxBytes: 512 * 1024 })
+      readVerifiedTerminalArtifact({
+        filePath,
+        expectedRealPath,
+        expectedStatIdentity: statIdentity(stats),
+        expectedContentDigest: terminalArtifactDigest('{"ok":true}'),
+        maxBytes: 512 * 1024
+      })
     ).rejects.toMatchObject({
       message: 'terminal_file_grant_stale',
       layer: 'terminal_artifact_grant',
