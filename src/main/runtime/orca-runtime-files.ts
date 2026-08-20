@@ -1216,7 +1216,7 @@ export class RuntimeFileCommands {
     maxBytes: number
   ): {
     expectedRealPath: string
-    expectedStatIdentity: string | null
+    expectedStatIdentity: string
     expectedContentDigest: string
     maxBytes: number
   } {

@@ -89,9 +89,13 @@ export type FileUploadSession = {
   close(): void
 }
 
-export type TerminalArtifactAccessOptions = {
+export type TerminalArtifactAccessOptions = Omit<
+  TerminalArtifactSnapshotOptions,
+  'expectedStatIdentity'
+> & {
+  expectedStatIdentity: string
   expectedContentDigest: string
-} & TerminalArtifactSnapshotOptions
+}
 
 export type TerminalArtifactSnapshotOptions = {
   expectedRealPath: string
