@@ -176,7 +176,7 @@ type TerminalFileGrant = {
   connectionId?: string
   clientId?: string
   expiresAt: number
-  statIdentity: string | null
+  statIdentity: string
   contentDigest: string
   expiryTimer?: ReturnType<typeof setTimeout>
 }
@@ -920,6 +920,7 @@ export class RuntimeFileCommands {
       ? await this.getRemoteTerminalArtifactSnapshot(args.absolutePath, args.connectionId, args.stats)
       : await getLocalTerminalArtifactSnapshot(args.absolutePath)
     assertTerminalArtifactNotHardLinked(snapshot.stats)
+    const statIdentity = requireTerminalFileStatIdentity(snapshot.stats)
     const grant: TerminalFileGrant = {
       id: randomUUID(),
       worktreeId: args.worktreeId,
@@ -928,7 +929,7 @@ export class RuntimeFileCommands {
       ...(args.connectionId ? { connectionId: args.connectionId } : {}),
       ...(args.clientId ? { clientId: args.clientId } : {}),
       expiresAt: Date.now() + TERMINAL_FILE_GRANT_TTL_MS,
-      statIdentity: terminalFileStatIdentity(snapshot.stats),
+      statIdentity,
       contentDigest: snapshot.contentDigest
     }
     this.terminalFileGrants.set(grant.id, grant)
@@ -1113,7 +1114,7 @@ export class RuntimeFileCommands {
         content,
         this.terminalArtifactAccessOptions(grant, MOBILE_FILE_READ_MAX_BYTES)
       )
-      grant.statIdentity = terminalFileStatIdentity(nextStat)
+      grant.statIdentity = requireTerminalFileStatIdentity(nextStat)
       grant.contentDigest = terminalArtifactContentDigest(Buffer.from(content, 'utf8'))
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
@@ -1155,7 +1156,7 @@ export class RuntimeFileCommands {
         await freshHandle.close()
       }
       await rename(tempPath, grant.absolutePath)
-      grant.statIdentity = terminalFileStatIdentity(
+      grant.statIdentity = requireTerminalFileStatIdentity(
         await this.statLocalTerminalPath(grant.absolutePath)
       )
       grant.contentDigest = terminalArtifactContentDigest(Buffer.from(content, 'utf8'))
@@ -2427,23 +2428,29 @@ async function readFileHandleBufferBounded(handle: FileHandle, limit: number): P
 }
 
 function terminalFileStatIdentity(stats: RuntimeFileStatLike): string | null {
-  const dev = typeof stats.dev === 'number' ? stats.dev : null
-  const ino = typeof stats.ino === 'number' ? stats.ino : null
-  const nlink = typeof stats.nlink === 'number' ? stats.nlink : null
-  const size = typeof stats.size === 'number' ? stats.size : null
+  const dev = typeof stats.dev === 'number' && Number.isFinite(stats.dev) ? stats.dev : null
+  const ino = typeof stats.ino === 'number' && Number.isFinite(stats.ino) ? stats.ino : null
+  const nlink = typeof stats.nlink === 'number' && Number.isFinite(stats.nlink) ? stats.nlink : null
+  const size = typeof stats.size === 'number' && Number.isFinite(stats.size) ? stats.size : null
   const mtimeMs =
-    typeof stats.mtimeMs === 'number'
+    typeof stats.mtimeMs === 'number' && Number.isFinite(stats.mtimeMs)
       ? stats.mtimeMs
-      : typeof stats.mtime === 'number'
+      : typeof stats.mtime === 'number' && Number.isFinite(stats.mtime)
         ? stats.mtime
         : null
-  if (dev !== null && ino !== null && size !== null && mtimeMs !== null) {
-    return `${dev}:${ino}:${nlink ?? 'unknown'}:${size}:${mtimeMs}`
-  }
-  if (size !== null && mtimeMs !== null) {
-    return `${size}:${mtimeMs}`
+  // Why: agents may bypass their sandbox; Orca must fail closed when freshness metadata is incomplete.
+  if (dev !== null && ino !== null && nlink !== null && size !== null && mtimeMs !== null) {
+    return `${dev}:${ino}:${nlink}:${size}:${mtimeMs}`
   }
   return null
+}
+
+function requireTerminalFileStatIdentity(stats: RuntimeFileStatLike): string {
+  const identity = terminalFileStatIdentity(stats)
+  if (identity === null) {
+    throw terminalFileGrantStaleError('stat_identity', 'complete_identity_required')
+  }
+  return identity
 }
 
 function terminalArtifactDigestLimit(absolutePath: string): number {
@@ -2511,10 +2518,23 @@ function terminalFileGrantStaleError(field: string, rule: string): Error & {
 
 function assertTerminalFileGrantFresh(grant: TerminalFileGrant, stats: RuntimeFileStatLike): void {
   assertTerminalArtifactNotHardLinked(stats)
+  if (grant.statIdentity === null) {
+    throw terminalFileGrantStaleError('stat_identity', 'complete_identity_required')
+  }
+  if (!isCompleteTerminalFileStatIdentity(grant.statIdentity)) {
+    throw terminalFileGrantStaleError('stat_identity_format', 'complete_identity_required')
+  }
   const nextIdentity = terminalFileStatIdentity(stats)
-  if (grant.statIdentity !== null && nextIdentity !== null && grant.statIdentity !== nextIdentity) {
+  if (nextIdentity === null) {
+    throw terminalFileGrantStaleError('stat_identity', 'complete_identity_required')
+  }
+  if (grant.statIdentity !== nextIdentity) {
     throw terminalFileGrantStaleError('stat_identity', 'matches_grant')
   }
+}
+
+function isCompleteTerminalFileStatIdentity(identity: string): boolean {
+  return identity.split(':').length === 5
 }
 
 function assertTerminalArtifactNotHardLinked(stats: RuntimeFileStatLike): void {

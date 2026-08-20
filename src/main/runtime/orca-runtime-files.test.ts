@@ -839,17 +839,33 @@ describe('RuntimeFileCommands', () => {
       const { commands, store } = createRuntimeFileCommands({ path: '/repo' })
       store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
       let realArtifactPath = artifactPath
-      const stat = vi.fn().mockResolvedValue({ type: 'file', size: 11, mtime: 3 })
+      const stat = vi.fn().mockResolvedValue({
+        type: 'file',
+        size: 11,
+        mtime: 3,
+        mtimeMs: 3,
+        dev: 1,
+        ino: 2,
+        nlink: 1
+      })
       const readTerminalArtifact = vi
         .fn()
         .mockResolvedValue({ content: '{"ok":true}', isBinary: false })
-      const writeTerminalArtifact = vi.fn().mockResolvedValue({ type: 'file', size: 12, mtime: 4 })
+      const writeTerminalArtifact = vi.fn().mockResolvedValue({
+        type: 'file',
+        size: 12,
+        mtime: 4,
+        mtimeMs: 4,
+        dev: 1,
+        ino: 3,
+        nlink: 1
+      })
       const realpath = vi.fn(async (p: string) => (p === artifactPath ? realArtifactPath : p))
       vi.mocked(getSshFilesystemProvider).mockReturnValue({
         stat,
         readTerminalArtifact,
         getTerminalArtifactSnapshot: vi.fn().mockResolvedValue({
-          stat: { type: 'file', size: 11, mtime: 3 },
+          stat: { type: 'file', size: 11, mtime: 3, mtimeMs: 3, dev: 1, ino: 2, nlink: 1 },
           contentDigest: 'digest'
         }),
         realpath,
@@ -859,6 +875,7 @@ describe('RuntimeFileCommands', () => {
         commands,
         readTerminalArtifact,
         writeTerminalArtifact,
+        stat,
         moveArtifactTarget: (nextPath: string) => {
           realArtifactPath = nextPath
         }
@@ -867,7 +884,7 @@ describe('RuntimeFileCommands', () => {
 
     function remoteTerminalArtifactSnapshot(content = '{}', size = Buffer.byteLength(content)) {
       return vi.fn().mockResolvedValue({
-        stat: { type: 'file', size, mtime: 3 },
+        stat: { type: 'file', size, mtime: 3, mtimeMs: 3, dev: 1, ino: 2, nlink: 1 },
         contentDigest: 'digest'
       })
     }
@@ -1520,6 +1537,7 @@ describe('RuntimeFileCommands', () => {
           size: 2,
           dev: 1,
           ino: 2,
+          nlink: 1,
           mtimeMs: 3
         })),
         read: vi.fn(async (buffer: Buffer) => {
@@ -1977,7 +1995,15 @@ describe('RuntimeFileCommands', () => {
       store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
       const stat = vi
         .fn()
-        .mockResolvedValue({ type: 'file', size: 4, mtimeMs: 3, isDirectory: () => false })
+        .mockResolvedValue({
+          type: 'file',
+          size: 4,
+          mtimeMs: 3,
+          dev: 1,
+          ino: 2,
+          nlink: 1,
+          isDirectory: () => false
+        })
       const writeTerminalArtifact = vi.fn().mockRejectedValue(new Error('binary_file'))
       const realpath = vi.fn(async (p: string) => p)
       const writeFile = vi.fn()
@@ -2003,6 +2029,47 @@ describe('RuntimeFileCommands', () => {
       ).rejects.toThrow('binary_file')
       expect(writeFile).not.toHaveBeenCalled()
       expect(writeTerminalArtifact).toHaveBeenCalled()
+    })
+
+    it('rejects remote grants when the snapshot identity is incomplete', async () => {
+      const { commands, store } = createRuntimeFileCommands({ path: '/repo' })
+      store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat: vi.fn().mockResolvedValue({ type: 'file', size: 2, mtime: 3 }),
+        realpath: vi.fn(async (path: string) => path),
+        getTerminalArtifactSnapshot: vi.fn().mockResolvedValue({
+          stat: { type: 'file', size: 2, mtime: 3, mtimeMs: 3, dev: 1, nlink: 1 },
+          contentDigest: 'digest'
+        })
+      } as never)
+
+      await expect(resolveTerminalArtifactPath(commands, '/tmp/result.json')).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'stat_identity',
+        rule: 'complete_identity_required'
+      })
+    })
+
+    it('rejects remote reads when the freshness stat identity is incomplete', async () => {
+      const { commands, stat } = createRemoteTerminalArtifactGrantFixture()
+      const result = await resolveTerminalArtifactPath(commands, '/tmp/result.json')
+      const target = absoluteFileTarget(result)
+      stat.mockResolvedValue({ type: 'file', size: 11, mtime: 3, mtimeMs: 3, dev: 1, nlink: 1 })
+
+      await expect(
+        commands.readTerminalArtifactFile(
+          'id:wt-1',
+          target.grantId,
+          target.absolutePath,
+          'client-a'
+        )
+      ).rejects.toMatchObject({
+        message: 'terminal_file_grant_stale',
+        layer: 'terminal_artifact_grant',
+        field: 'stat_identity',
+        rule: 'complete_identity_required'
+      })
     })
 
     it('rejects remote terminal artifact reads when a grant no longer resolves to the granted path', async () => {

@@ -26,7 +26,9 @@ export type {
   FileUploadSession,
   IFilesystemProvider,
   TerminalArtifactSnapshot,
-  TerminalArtifactAccessOptions
+  TerminalArtifactAccessOptions,
+  TerminalArtifactSnapshotOptions,
+  TerminalArtifactFileStat
 } from './filesystem-provider-contract'
 
 // ─── Git Provider ───────────────────────────────────────────────────
