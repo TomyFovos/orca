@@ -8,6 +8,7 @@ import {
   RequestBodyReadError,
   readManagedExecutionRequestBody
 } from './request-body-reader'
+import { ManagedExecutionReceiptStore } from './managed-execution-receipt-store'
 
 const DEFAULT_PORT = 6770
 const DEFAULT_HOST = '127.0.0.1'
@@ -17,6 +18,7 @@ export type EndpointConfig = {
   port?: number
   onProtectedEffect?: (payload: ExecuteRequest['payload']) => void
   bodyReadTimeoutMs?: number
+  receiptStore?: ManagedExecutionReceiptStore<StoredAcceptedReceipt>
 }
 
 type ExecutionReceipt = {
@@ -36,7 +38,7 @@ type ExecutionReceipt = {
   accepted_at: string
 }
 
-type StoredAcceptedReceipt = {
+export type StoredAcceptedReceipt = {
   receipt: ExecutionReceipt & {
     outcome: 'accepted'
     backend_ref: string
@@ -44,7 +46,9 @@ type StoredAcceptedReceipt = {
   }
 }
 
-const completedReceipts = new Map<string, StoredAcceptedReceipt>() // Retain expired-known receipts.
+// Expired identities stay replayable; capacity refuses unknown identities instead of evicting.
+const completedReceipts = new ManagedExecutionReceiptStore<StoredAcceptedReceipt>()
+let managedExecutionTail: Promise<void> = Promise.resolve()
 
 export async function startManagedExecutionEndpoint(
   config: EndpointConfig = {}
@@ -64,6 +68,7 @@ export async function startManagedExecutionEndpoint(
   const host = config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_HOST
   const port = resolvePort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
   const bodyReadTimeoutMs = resolveBodyReadTimeout(config.bodyReadTimeoutMs)
+  const receiptStore = config.receiptStore ?? completedReceipts
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'POST' || req.url !== '/execute') {
@@ -80,38 +85,59 @@ export async function startManagedExecutionEndpoint(
         respondJson(res, 400, { error: { code: IssuerErrorCode.MALFORMED_REQUEST } })
         return
       }
-      envelope = parsedEnvelope
+      const acceptedEnvelope = parsedEnvelope
+      envelope = acceptedEnvelope
 
-      // 検証と capability mint
-      const authorization = mintAuthorization(envelope)
+      await runSerializedManagedExecution(() => {
+        // Why: a launched agent may bypass approvals and sandbox; Orca must enforce
+        // the receipt bound before minting authority or running the protected effect.
+        if (!receiptStore.has(acceptedEnvelope.binding.request_id) && receiptStore.isAtCapacity) {
+          throw new IssuerError(
+            IssuerErrorCode.RECEIPT_STORE_CAPACITY_EXCEEDED,
+            'Managed execution receipt store capacity reached',
+            {
+              layer: 'receipt-store',
+              field: 'completed_receipts',
+              rule: 'max-entries'
+            }
+          )
+        }
 
-      // 保護された効果を実行（この例では何もしない）
-      // 実際には operation に応じた処理を行う
-      assertManagedExecutionAuthorized(envelope.binding.operation, authorization)
-      config.onProtectedEffect?.(envelope.payload)
+        // 検証と capability mint
+        const authorization = mintAuthorization(acceptedEnvelope)
 
-      // 成功応答（execution-receipt/1 準拠、outcome=accepted）
-      const receipt: StoredAcceptedReceipt['receipt'] = {
-        schema: 'ai-de.execution-receipt/1',
-        request_id: envelope.binding.request_id,
-        operation: envelope.binding.operation,
-        case_id: envelope.binding.case_id,
-        task_id: envelope.binding.task_id,
-        attempt_id: envelope.binding.attempt_id,
-        protocol_version: envelope.binding.protocol_version,
-        schema_version: envelope.binding.schema_version,
-        outcome: 'accepted',
-        backend_kind: 'orca',
-        backend_ref: 'orca-backend-1',
-        backend_session_id: `session-${Date.now()}`,
-        accepted_at: new Date().toISOString()
-      }
+        // 保護された効果を実行（この例では何もしない）
+        // 実際には operation に応じた処理を行う
+        assertManagedExecutionAuthorized(acceptedEnvelope.binding.operation, authorization)
+        config.onProtectedEffect?.(acceptedEnvelope.payload)
 
-      completedReceipts.set(envelope.binding.request_id, {
-        receipt
+        // 成功応答（execution-receipt/1 準拠、outcome=accepted）
+        const receipt: StoredAcceptedReceipt['receipt'] = {
+          schema: 'ai-de.execution-receipt/1',
+          request_id: acceptedEnvelope.binding.request_id,
+          operation: acceptedEnvelope.binding.operation,
+          case_id: acceptedEnvelope.binding.case_id,
+          task_id: acceptedEnvelope.binding.task_id,
+          attempt_id: acceptedEnvelope.binding.attempt_id,
+          protocol_version: acceptedEnvelope.binding.protocol_version,
+          schema_version: acceptedEnvelope.binding.schema_version,
+          outcome: 'accepted',
+          backend_kind: 'orca',
+          backend_ref: 'orca-backend-1',
+          backend_session_id: `session-${Date.now()}`,
+          accepted_at: new Date().toISOString()
+        }
+
+        if (!receiptStore.set(acceptedEnvelope.binding.request_id, { receipt })) {
+          console.error(
+            `[managed-execution] Receipt store admission failed: request_id=${acceptedEnvelope.binding.request_id} layer=receipt-store field=completed_receipts rule=max-entries`
+          )
+          respondJson(res, 500, { error: { code: 'INTERNAL_ERROR' } })
+          return
+        }
+
+        respondJson(res, 200, receipt)
       })
-
-      respondJson(res, 200, receipt)
     } catch (error) {
       if (error instanceof RequestBodyReadError) {
         console.error(
@@ -125,7 +151,7 @@ export async function startManagedExecutionEndpoint(
         )
 
         if (error.code === IssuerErrorCode.REPLAY_ATTACK) {
-          const stored = completedReceipts.get(envelope.binding.request_id)
+          const stored = receiptStore.get(envelope.binding.request_id)
           if (!stored) {
             console.error(
               `[managed-execution] Replay receipt missing: request_id=${envelope.binding.request_id}`
@@ -166,7 +192,8 @@ export async function startManagedExecutionEndpoint(
         )
         respondJson(res, 400, { error: { code: IssuerErrorCode.MALFORMED_REQUEST } })
       } else {
-        console.error(`[managed-execution] Unexpected error: ${error}`)
+        const message = error instanceof Error ? error.message : String(error)
+        console.error(`[managed-execution] Unexpected error: ${message}`)
         respondJson(res, 500, { error: { code: 'INTERNAL_ERROR' } })
       }
     }
@@ -202,6 +229,15 @@ function resolvePort(configPort: number | undefined, environmentPort: string | u
     return DEFAULT_PORT
   }
   return validatePort(Number(environmentPort), 'ORCA_MANAGED_ENDPOINT_PORT')
+}
+
+function runSerializedManagedExecution(task: () => void): Promise<void> {
+  const next = managedExecutionTail.then(task, task)
+  managedExecutionTail = next.then(
+    () => undefined,
+    () => undefined
+  )
+  return next
 }
 
 function validatePort(value: number, source: string): number {

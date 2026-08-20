@@ -2,13 +2,13 @@ import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest
 import { createHash, generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import * as fs from 'node:fs'
 import type { Server } from 'node:http'
-import type { AddressInfo } from 'node:net'
-import { createConnection, type Socket } from 'node:net'
+import { createConnection, type AddressInfo, type Socket } from 'node:net'
 import * as os from 'node:os'
 import * as path from 'node:path'
 import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
-import { startManagedExecutionEndpoint } from '../endpoint'
+import { startManagedExecutionEndpoint, type StoredAcceptedReceipt } from '../endpoint'
+import { ManagedExecutionReceiptStore } from '../managed-execution-receipt-store'
 import { MAX_MANAGED_EXECUTION_BODY_BYTES } from '../request-body-reader'
 import { EXECUTION_REQUEST_CONTRACT_VERSIONS } from '../execution-request-contract'
 import type { ExecuteRequest } from '../issuer'
@@ -547,11 +547,13 @@ describe('managed execution endpoint authorization path', () => {
     let protectedEffectCalls = 0
     const server = await startManagedExecutionEndpoint({
       port: 0,
+      receiptStore: new ManagedExecutionReceiptStore<StoredAcceptedReceipt>(1),
       onProtectedEffect: () => {
         protectedEffectCalls += 1
       }
     })
     expect(server).not.toBeNull()
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
 
     try {
       const address = server!.address()
@@ -571,8 +573,21 @@ describe('managed execution endpoint authorization path', () => {
       expect(replayed.receipt).toEqual({ ...accepted.receipt, outcome: 'replayed' })
       expect(replayed.receipt.backend_session_id).toBe(accepted.receipt.backend_session_id)
       expect(replayed.receipt.accepted_at).toBe(accepted.receipt.accepted_at)
+
+      const newRequest = createSignedRequest()
+      const capacityRejected = await postExecute(port, newRequest)
+      expect(capacityRejected.status).toBe(400)
+      expect(capacityRejected.receipt).toMatchObject({
+        outcome: 'rejected',
+        reject_reason: 'RECEIPT_STORE_CAPACITY_EXCEEDED'
+      })
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[managed-execution] Request rejected: request_id=${newRequest.binding.request_id} code=RECEIPT_STORE_CAPACITY_EXCEEDED layer=receipt-store field=completed_receipts rule=max-entries`
+      )
+      expect(errorSpy.mock.calls.flat().join('\n')).not.toContain('managed-e2e-case')
       expect(protectedEffectCalls).toBe(1)
     } finally {
+      errorSpy.mockRestore()
       await closeServer(server!)
     }
   })
