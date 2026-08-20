@@ -848,6 +848,10 @@ describe('RuntimeFileCommands', () => {
       vi.mocked(getSshFilesystemProvider).mockReturnValue({
         stat,
         readTerminalArtifact,
+        getTerminalArtifactSnapshot: vi.fn().mockResolvedValue({
+          stat: { type: 'file', size: 11, mtime: 3 },
+          contentDigest: 'digest'
+        }),
         realpath,
         writeTerminalArtifact
       } as never)
@@ -859,6 +863,13 @@ describe('RuntimeFileCommands', () => {
           realArtifactPath = nextPath
         }
       }
+    }
+
+    function remoteTerminalArtifactSnapshot(content = '{}', size = Buffer.byteLength(content)) {
+      return vi.fn().mockResolvedValue({
+        stat: { type: 'file', size, mtime: 3 },
+        contentDigest: 'digest'
+      })
     }
 
     it('resolves an absolute path inside the worktree to a relative path', async () => {
@@ -1163,7 +1174,11 @@ describe('RuntimeFileCommands', () => {
       const realpath = vi.fn(async (p: string) =>
         p === '/tmp/link-result.json' ? '/tmp/result.json' : p
       )
-      vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat, realpath } as never)
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat,
+        realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot()
+      } as never)
 
       const result = await resolveTerminalArtifactPath(commands, '/tmp/link-result.json')
 
@@ -1185,7 +1200,11 @@ describe('RuntimeFileCommands', () => {
       store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
       const stat = vi.fn().mockResolvedValue({ type: 'file', size: 2, mtime: 3, nlink: 2 })
       const realpath = vi.fn(async (p: string) => p)
-      vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat, realpath } as never)
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat,
+        realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot()
+      } as never)
 
       const result = await resolveTerminalArtifactPath(commands, '/tmp/result.json')
 
@@ -1202,7 +1221,11 @@ describe('RuntimeFileCommands', () => {
       store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
       const stat = vi.fn().mockResolvedValue({ type: 'file', size: 2, mtime: 3 })
       const realpath = vi.fn(async (p: string) => p)
-      vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat, realpath } as never)
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat,
+        realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot()
+      } as never)
 
       const result = await resolveTerminalArtifactPath(commands, '/private/tmp/result.json')
 
@@ -1226,7 +1249,11 @@ describe('RuntimeFileCommands', () => {
       const realpath = vi.fn(async (p: string) =>
         p === '/tmp/link-result.json' ? '/home/me/.ssh/config' : p
       )
-      vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat, realpath } as never)
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat,
+        realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot()
+      } as never)
 
       const result = await commands.resolveTerminalPath(
         'id:wt-1',
@@ -1397,7 +1424,11 @@ describe('RuntimeFileCommands', () => {
       store.getRepo.mockReturnValue({ connectionId: 'ssh-1' })
       const stat = vi.fn().mockResolvedValue({ type: 'file', size: 2, mtime: 3 })
       const realpath = vi.fn(async (p: string) => p)
-      vi.mocked(getSshFilesystemProvider).mockReturnValue({ stat, realpath } as never)
+      vi.mocked(getSshFilesystemProvider).mockReturnValue({
+        stat,
+        realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot()
+      } as never)
 
       const result = await resolveTerminalArtifactPath(commands, '//remote-host/tmp/result.json')
 
@@ -1491,6 +1522,10 @@ describe('RuntimeFileCommands', () => {
           ino: 2,
           mtimeMs: 3
         })),
+        read: vi.fn(async (buffer: Buffer) => {
+          Buffer.from('{}').copy(buffer)
+          return { bytesRead: 2 }
+        }),
         close: vi.fn(async () => undefined)
       })
 
@@ -1814,6 +1849,7 @@ describe('RuntimeFileCommands', () => {
       vi.mocked(getSshFilesystemProvider).mockReturnValue({
         stat,
         realpath,
+        getTerminalArtifactSnapshot: remoteTerminalArtifactSnapshot('{}', 4),
         writeFile,
         writeTerminalArtifact
       } as never)
@@ -1839,6 +1875,7 @@ describe('RuntimeFileCommands', () => {
         createRemoteTerminalArtifactGrantFixture()
       const result = await resolveTerminalArtifactPath(commands, '/tmp/result.json')
       const target = absoluteFileTarget(result)
+      readTerminalArtifact.mockClear()
 
       moveArtifactTarget('/home/me/.ssh/config')
 
@@ -1858,6 +1895,7 @@ describe('RuntimeFileCommands', () => {
         createRemoteTerminalArtifactGrantFixture('/tmp/result.png')
       const result = await resolveTerminalArtifactPath(commands, '/tmp/result.png')
       const target = absoluteFileTarget(result)
+      readTerminalArtifact.mockClear()
 
       moveArtifactTarget('/tmp/other.png')
 
@@ -1877,6 +1915,7 @@ describe('RuntimeFileCommands', () => {
         createRemoteTerminalArtifactGrantFixture()
       const result = await resolveTerminalArtifactPath(commands, '/tmp/result.json')
       const target = absoluteFileTarget(result)
+      readTerminalArtifact.mockClear()
 
       moveArtifactTarget('/home/me/.ssh/config')
 

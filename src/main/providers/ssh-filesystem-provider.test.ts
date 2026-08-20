@@ -93,6 +93,7 @@ describe('SshFilesystemProvider', () => {
         provider.readTerminalArtifact('/tmp/result.json', {
           expectedRealPath: '/tmp/result.json',
           expectedStatIdentity: '1:2:3:4',
+          expectedContentDigest: 'digest',
           maxBytes: 1024
         })
       ).resolves.toEqual({ content: '{}', isBinary: false })
@@ -100,6 +101,7 @@ describe('SshFilesystemProvider', () => {
         filePath: '/tmp/result.json',
         expectedRealPath: '/tmp/result.json',
         expectedStatIdentity: '1:2:3:4',
+        expectedContentDigest: 'digest',
         maxBytes: 1024
       })
     })
@@ -111,6 +113,7 @@ describe('SshFilesystemProvider', () => {
         provider.readTerminalArtifact('/tmp/result.json', {
           expectedRealPath: '/tmp/result.json',
           expectedStatIdentity: '1:2:3:4',
+          expectedContentDigest: 'digest',
           maxBytes: 1024
         })
       ).rejects.toThrow('Reconnect the SSH target')
@@ -135,6 +138,7 @@ describe('SshFilesystemProvider', () => {
         provider.writeTerminalArtifact('/tmp/result.json', '{}', {
           expectedRealPath: '/tmp/result.json',
           expectedStatIdentity: '1:2:3:4',
+          expectedContentDigest: 'digest',
           maxBytes: 1024
         })
       ).resolves.toEqual({ type: 'file', size: 2, mtime: 3 })
@@ -143,6 +147,7 @@ describe('SshFilesystemProvider', () => {
         content: '{}',
         expectedRealPath: '/tmp/result.json',
         expectedStatIdentity: '1:2:3:4',
+        expectedContentDigest: 'digest',
         maxBytes: 1024
       })
     })

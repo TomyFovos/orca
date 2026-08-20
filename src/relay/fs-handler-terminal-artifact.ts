@@ -3,7 +3,7 @@ import type { Stats } from 'node:fs'
 import { chmod, open, realpath, rename, rm, writeFile } from 'node:fs/promises'
 import type { FileHandle } from 'node:fs/promises'
 import { basename, dirname, extname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   IMAGE_MIME_TYPES,
   isBinaryBuffer,
@@ -25,6 +25,7 @@ type TerminalArtifactStat = {
 type VerifiedTerminalArtifactOptions = {
   expectedRealPath: string
   expectedStatIdentity?: string | null
+  expectedContentDigest?: string | null
   maxBytes?: number
 }
 
@@ -42,6 +43,7 @@ export async function readVerifiedTerminalArtifact(params: Record<string, unknow
       mimeType ? MAX_PREVIEWABLE_BINARY_SIZE : MAX_TEXT_FILE_SIZE
     )
     const buffer = await readBoundedFileFromHandle(handle, sizeLimit)
+    assertTerminalArtifactContentDigest(options.expectedContentDigest ?? null, buffer)
     if (mimeType) {
       return { content: buffer.toString('base64'), isBinary: true, isImage: true, mimeType }
     }
@@ -49,6 +51,19 @@ export async function readVerifiedTerminalArtifact(params: Record<string, unknow
       return { content: '', isBinary: true }
     }
     return { content: buffer.toString('utf-8'), isBinary: false }
+  } finally {
+    await handle.close()
+  }
+}
+
+export async function getVerifiedTerminalArtifactSnapshot(params: Record<string, unknown>) {
+  const filePath = stringParam(params.filePath)
+  const options = verifiedTerminalArtifactOptions(params)
+  const handle = await openVerifiedTerminalArtifact(filePath, options, constants.O_RDONLY)
+  try {
+    const stat = await verifiedHandleStat(handle, options)
+    const buffer = await readBoundedFileFromHandle(handle, options.maxBytes ?? MAX_TEXT_FILE_SIZE)
+    return { stat, contentDigest: terminalArtifactContentDigest(buffer) }
   } finally {
     await handle.close()
   }
@@ -70,6 +85,7 @@ export async function writeVerifiedTerminalArtifact(
   try {
     originalMode = (await verifiedHandleStat(handle, options)).mode ?? null
     const existing = await readBoundedFileFromHandle(handle, writeLimit)
+    assertTerminalArtifactContentDigest(options.expectedContentDigest ?? null, existing)
     if (isBinaryBuffer(existing)) {
       throw new Error('binary_file')
     }
@@ -229,6 +245,31 @@ function assertTerminalArtifactStatIdentity(
   }
 }
 
+function terminalArtifactContentDigest(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function assertTerminalArtifactContentDigest(expectedContentDigest: string | null, content: Buffer): void {
+  if (
+    expectedContentDigest !== null &&
+    expectedContentDigest !== terminalArtifactContentDigest(content)
+  ) {
+    throw terminalArtifactStaleError('content_digest', 'sha256_match')
+  }
+}
+
+function terminalArtifactStaleError(field: string, rule: string): Error & {
+  layer: 'terminal_artifact_grant'
+  field: string
+  rule: string
+} {
+  return Object.assign(new Error('terminal_file_grant_stale'), {
+    layer: 'terminal_artifact_grant' as const,
+    field,
+    rule
+  })
+}
+
 function verifiedTerminalArtifactOptions(
   params: Record<string, unknown>
 ): VerifiedTerminalArtifactOptions {
@@ -236,6 +277,8 @@ function verifiedTerminalArtifactOptions(
     expectedRealPath: stringParam(params.expectedRealPath),
     expectedStatIdentity:
       typeof params.expectedStatIdentity === 'string' ? params.expectedStatIdentity : null,
+    expectedContentDigest:
+      typeof params.expectedContentDigest === 'string' ? params.expectedContentDigest : null,
     maxBytes:
       typeof params.maxBytes === 'number' && Number.isFinite(params.maxBytes)
         ? Math.max(0, Math.floor(params.maxBytes))

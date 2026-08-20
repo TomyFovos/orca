@@ -18,6 +18,11 @@ export type FileReadResult = {
   mimeType?: string
 }
 
+export type TerminalArtifactSnapshot = {
+  stat: FileStat
+  contentDigest: string
+}
+
 export type IFilesystemProvider = {
   readDir(dirPath: string): Promise<DirEntry[]>
   readFile(filePath: string): Promise<FileReadResult>
@@ -25,6 +30,10 @@ export type IFilesystemProvider = {
     filePath: string,
     options: TerminalArtifactAccessOptions
   ): Promise<FileReadResult>
+  getTerminalArtifactSnapshot?(
+    filePath: string,
+    options: TerminalArtifactAccessOptions
+  ): Promise<TerminalArtifactSnapshot>
   downloadFile?(sourcePath: string, destinationPath: string): Promise<void>
   downloadFolder?: (src: string, dest: string, options?: { signal?: AbortSignal }) => Promise<void>
   openFileUploadSession?(): Promise<FileUploadSession>
@@ -76,5 +85,6 @@ export type FileUploadSession = {
 export type TerminalArtifactAccessOptions = {
   expectedRealPath: string
   expectedStatIdentity: string | null
+  expectedContentDigest?: string | null
   maxBytes: number
 }

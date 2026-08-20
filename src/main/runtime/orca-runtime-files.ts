@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- Why: filesystem, editor-file, and search commands share the same local/SSH path authorization rules. Keeping that IO adapter together prevents separate command paths from drifting on safety checks. */
 import type { ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { watch as watchFs } from 'node:fs'
 import type { FileHandle } from 'node:fs/promises'
 import {
@@ -177,6 +177,7 @@ type TerminalFileGrant = {
   clientId?: string
   expiresAt: number
   statIdentity: string | null
+  contentDigest: string
   expiryTimer?: ReturnType<typeof setTimeout>
 }
 
@@ -805,7 +806,7 @@ export class RuntimeFileCommands {
       }
       const grant = isDirectory
         ? null
-        : this.createTerminalFileGrant({
+        : await this.createTerminalFileGrant({
             worktreeId: worktree.id,
             absolutePath: artifactPath,
             provider: connectionId ? 'ssh' : 'local',
@@ -907,15 +908,18 @@ export class RuntimeFileCommands {
     }
   }
 
-  private createTerminalFileGrant(args: {
+  private async createTerminalFileGrant(args: {
     worktreeId: string
     absolutePath: string
     provider: 'local' | 'ssh'
     connectionId?: string
     clientId?: string
     stats: RuntimeFileStatLike
-  }): TerminalFileGrant {
-    assertTerminalArtifactNotHardLinked(args.stats)
+  }): Promise<TerminalFileGrant> {
+    const snapshot = args.connectionId
+      ? await this.getRemoteTerminalArtifactSnapshot(args.absolutePath, args.connectionId, args.stats)
+      : await getLocalTerminalArtifactSnapshot(args.absolutePath)
+    assertTerminalArtifactNotHardLinked(snapshot.stats)
     const grant: TerminalFileGrant = {
       id: randomUUID(),
       worktreeId: args.worktreeId,
@@ -924,7 +928,8 @@ export class RuntimeFileCommands {
       ...(args.connectionId ? { connectionId: args.connectionId } : {}),
       ...(args.clientId ? { clientId: args.clientId } : {}),
       expiresAt: Date.now() + TERMINAL_FILE_GRANT_TTL_MS,
-      statIdentity: terminalFileStatIdentity(args.stats)
+      statIdentity: terminalFileStatIdentity(snapshot.stats),
+      contentDigest: snapshot.contentDigest
     }
     this.terminalFileGrants.set(grant.id, grant)
     this.scheduleTerminalFileGrantExpiry(grant)
@@ -1109,6 +1114,7 @@ export class RuntimeFileCommands {
         this.terminalArtifactAccessOptions(grant, MOBILE_FILE_READ_MAX_BYTES)
       )
       grant.statIdentity = terminalFileStatIdentity(nextStat)
+      grant.contentDigest = terminalArtifactContentDigest(Buffer.from(content, 'utf8'))
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
     }
@@ -1125,9 +1131,9 @@ export class RuntimeFileCommands {
         throw new Error('file_too_large')
       }
       assertTerminalFileGrantFresh(grant, fileStats)
-      if (
-        isBinaryBuffer(await readFileHandleBufferBounded(handle, MOBILE_FILE_READ_MAX_BYTES + 1))
-      ) {
+      const existing = await readFileHandleBufferBounded(handle, MOBILE_FILE_READ_MAX_BYTES + 1)
+      assertTerminalFileGrantContentFresh(grant, existing)
+      if (isBinaryBuffer(existing)) {
         throw new Error('binary_file')
       }
     } finally {
@@ -1152,6 +1158,7 @@ export class RuntimeFileCommands {
       grant.statIdentity = terminalFileStatIdentity(
         await this.statLocalTerminalPath(grant.absolutePath)
       )
+      grant.contentDigest = terminalArtifactContentDigest(Buffer.from(content, 'utf8'))
       this.refreshTerminalFileGrant(grant)
       return { ok: true }
     } finally {
@@ -1206,10 +1213,16 @@ export class RuntimeFileCommands {
   private terminalArtifactAccessOptions(
     grant: TerminalFileGrant,
     maxBytes: number
-  ): { expectedRealPath: string; expectedStatIdentity: string | null; maxBytes: number } {
+  ): {
+    expectedRealPath: string
+    expectedStatIdentity: string | null
+    expectedContentDigest: string
+    maxBytes: number
+  } {
     return {
       expectedRealPath: grant.absolutePath,
       expectedStatIdentity: grant.statIdentity,
+      expectedContentDigest: grant.contentDigest,
       maxBytes
     }
   }
@@ -1228,6 +1241,23 @@ export class RuntimeFileCommands {
     const fileStat = await provider.stat(grant.absolutePath)
     assertTerminalFileGrantFresh(grant, fileStat)
     return { provider, fileStat }
+  }
+
+  private async getRemoteTerminalArtifactSnapshot(
+    absolutePath: string,
+    connectionId: string,
+    stats: RuntimeFileStatLike
+  ): Promise<{ stats: RuntimeFileStatLike; contentDigest: string }> {
+    const provider = getSshFilesystemProvider(connectionId)
+    if (!provider?.getTerminalArtifactSnapshot) {
+      throw new Error('terminal_file_grant_unavailable')
+    }
+    const snapshot = await provider.getTerminalArtifactSnapshot(absolutePath, {
+      expectedRealPath: absolutePath,
+      expectedStatIdentity: terminalFileStatIdentity(stats),
+      maxBytes: terminalArtifactDigestLimit(absolutePath)
+    })
+    return { stats: snapshot.stat, contentDigest: snapshot.contentDigest }
   }
 
   private async assertRemoteTerminalFileGrantPathStillCanonical(
@@ -2231,6 +2261,7 @@ async function readLocalTerminalArtifactFileFromHandle(
   }
   assertTerminalFileGrantFresh(grant, fileStat)
   const buffer = await readFileHandleBufferBounded(handle, MOBILE_FILE_READ_MAX_BYTES + 1)
+  assertTerminalFileGrantContentFresh(grant, buffer)
   if (isBinaryBuffer(buffer)) {
     throw new Error('binary_file')
   }
@@ -2255,6 +2286,7 @@ async function readLocalTerminalArtifactPreviewFromHandle(
       handle,
       RUNTIME_PREVIEWABLE_BINARY_MAX_BYTES + 1
     )
+    assertTerminalFileGrantContentFresh(grant, buffer)
     return {
       content: buffer.toString('base64'),
       isBinary: true,
@@ -2412,6 +2444,66 @@ function terminalFileStatIdentity(stats: RuntimeFileStatLike): string | null {
     return `${size}:${mtimeMs}`
   }
   return null
+}
+
+function terminalArtifactDigestLimit(absolutePath: string): number {
+  return RUNTIME_PREVIEWABLE_BINARY_MIME_TYPES[extname(absolutePath).toLowerCase()]
+    ? RUNTIME_PREVIEWABLE_BINARY_MAX_BYTES
+    : MOBILE_FILE_READ_MAX_BYTES
+}
+
+async function getLocalTerminalArtifactSnapshot(
+  absolutePath: string
+): Promise<{ stats: RuntimeFileStatLike; contentDigest: string }> {
+  await assertLocalTerminalArtifactPathStillCanonical(absolutePath)
+  const handle = await open(absolutePath, constants.O_RDONLY | OPEN_NOFOLLOW)
+  try {
+    const stats = await handle.stat()
+    if (stats.isDirectory() || stats.size > terminalArtifactDigestLimit(absolutePath)) {
+      throw new Error('terminal_file_grant_stale')
+    }
+    const content = await readFileHandleBufferBounded(
+      handle,
+      terminalArtifactDigestLimit(absolutePath) + 1
+    )
+    if (content.byteLength > terminalArtifactDigestLimit(absolutePath)) {
+      throw new Error('terminal_file_grant_stale')
+    }
+    return {
+      stats,
+      contentDigest: terminalArtifactContentDigest(content)
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+      throw new Error('terminal_file_grant_stale')
+    }
+    throw error
+  } finally {
+    await handle.close()
+  }
+}
+
+function terminalArtifactContentDigest(content: Buffer): string {
+  return createHash('sha256').update(content).digest('hex')
+}
+
+function assertTerminalFileGrantContentFresh(grant: TerminalFileGrant, content: Buffer): void {
+  // Why: terminal agents can replace artifacts after a tap, so Orca—not the agent—must enforce freshness.
+  if (grant.contentDigest !== terminalArtifactContentDigest(content)) {
+    throw terminalFileGrantStaleError('content_digest', 'sha256_match')
+  }
+}
+
+function terminalFileGrantStaleError(field: string, rule: string): Error & {
+  layer: 'terminal_artifact_grant'
+  field: string
+  rule: string
+} {
+  return Object.assign(new Error('terminal_file_grant_stale'), {
+    layer: 'terminal_artifact_grant' as const,
+    field,
+    rule
+  })
 }
 
 function assertTerminalFileGrantFresh(grant: TerminalFileGrant, stats: RuntimeFileStatLike): void {
