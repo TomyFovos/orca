@@ -1,5 +1,5 @@
 /* eslint-disable max-lines */
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type * as GitUsernameModule from '../git/git-username'
 import { lstat, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -276,6 +276,8 @@ import {
   registerWorktreeHandlers
 } from './worktrees'
 import { clearConfiguredWorktreeSharedDirectoriesCacheForTests } from '../git/worktree-shared-directories'
+import { setProcessRuntimeProfile } from '../runtime/runtime-profile'
+import { MANAGED_WORKTREE_ROOT_ENV } from '../runtime/managed-execution/managed-worktree-placement'
 import {
   getSshProviderAuthority,
   resetSshProviderAuthorities,
@@ -330,6 +332,8 @@ describe('registerWorktreeHandlers', () => {
   }
 
   beforeEach(() => {
+    setProcessRuntimeProfile('default')
+    delete process.env[MANAGED_WORKTREE_ROOT_ENV]
     setPlatform(ORIGINAL_PLATFORM)
     clearConfiguredWorktreeSharedDirectoriesCacheForTests()
     __resetSshWorktreeCreateFetchCacheForTests()
@@ -566,6 +570,11 @@ describe('registerWorktreeHandlers', () => {
     registerWorktreeHandlers(mainWindow as never, store as never, runtimeStub as never)
   })
 
+  afterEach(() => {
+    setProcessRuntimeProfile('default')
+    delete process.env[MANAGED_WORKTREE_ROOT_ENV]
+  })
+
   it('clears the GitLab MR base handler before re-registering IPC handlers', () => {
     expect(removeHandlerMock).toHaveBeenCalledWith('worktrees:resolveMrBase')
     expect(handlers['worktrees:resolveMrBase']).toBeDefined()
@@ -574,6 +583,47 @@ describe('registerWorktreeHandlers', () => {
   it('clears the branch rename failure-output handler before re-registering IPC handlers', () => {
     expect(removeHandlerMock).toHaveBeenCalledWith('worktrees:getBranchRenameFailureOutput')
     expect(handlers['worktrees:getBranchRenameFailureOutput']).toBeDefined()
+  })
+
+  it('returns managed placement rejection details as a structured IPC value', async () => {
+    setProcessRuntimeProfile('managed')
+
+    const result = await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'managed-workspace'
+    })
+
+    expect(result).toMatchObject({
+      kind: 'managed_worktree_placement_rejected',
+      code: 'managed_worktree_placement_unavailable',
+      data: {
+        code: 'unset',
+        field: MANAGED_WORKTREE_ROOT_ENV,
+        rule: 'required-in-managed-profile',
+        detail: expect.stringContaining('has no default worktree root')
+      },
+      message: expect.stringContaining('Managed worktree placement rejected (unset)')
+    })
+  })
+
+  it('keeps default-profile worktree creation as the normal result shape', async () => {
+    listWorktreesMock.mockResolvedValue([
+      {
+        path: '/workspace/default-workspace',
+        head: 'abc123',
+        branch: 'refs/heads/default-workspace',
+        isBare: false,
+        isMainWorktree: false
+      }
+    ])
+
+    const result = await handlers['worktrees:create'](null, {
+      repoId: 'repo-1',
+      name: 'default-workspace'
+    })
+
+    expect(result).toHaveProperty('worktree')
+    expect(result).not.toHaveProperty('kind', 'managed_worktree_placement_rejected')
   })
 
   it('persistSortOrder only reorders existing worktrees and never mints meta for a stale id', () => {

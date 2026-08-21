@@ -38,6 +38,11 @@ import type {
   WorkspaceLineage,
   WorktreeMeta
 } from '../../shared/types'
+import {
+  MANAGED_WORKTREE_PLACEMENT_IPC_FAILURE_KIND,
+  type ManagedWorktreePlacementIpcFailure,
+  type WorktreeCreateIpcResult
+} from '../../shared/worktree-create-ipc'
 import { assertWorktreeUnlockedForRemoval } from '../../shared/worktree-removal'
 import {
   getRepoExecutionHostId,
@@ -139,6 +144,7 @@ import {
   registerSshProviderRequestAbort
 } from '../ssh/ssh-provider-authority'
 import { createSenderScopedRequestCancellations } from './sender-scoped-request-cancellation'
+import { ManagedWorktreePlacementError } from '../runtime/managed-execution/managed-worktree-placement'
 
 type CreateWorktreeArgsWithSystemProvenance = CreateWorktreeArgs & {
   automationProvenance?: AutomationWorkspaceProvenance
@@ -2051,7 +2057,7 @@ export function registerWorktreeHandlers(
 
   ipcMain.handle(
     'worktrees:create',
-    async (_event, rawArgs: CreateWorktreeArgs): Promise<CreateWorktreeResult> => {
+    async (_event, rawArgs: CreateWorktreeArgs): Promise<WorktreeCreateIpcResult> => {
       const args = normalizeLinkedWorkItemFields(rawArgs)
       // Why span here: parent the child git spans for the trace tree; don't attach branch name/remote URL (user content) — repo ID is the safer correlator.
       return withWorktreeSpan({ stage: 'create' }, async () => {
@@ -2089,6 +2095,17 @@ export function registerWorktreeHandlers(
             error_class: classifyWorkspaceCreateError(error),
             ...getCohortAtEmit()
           })
+          if (error instanceof ManagedWorktreePlacementError) {
+            const failure: ManagedWorktreePlacementIpcFailure = {
+              kind: MANAGED_WORKTREE_PLACEMENT_IPC_FAILURE_KIND,
+              code: error.code,
+              data: error.data,
+              message: error.message
+            }
+            // Why: Electron serializes rejected ipcMain errors as message/name/stack only. Return
+            // this allowlisted plain value so preload/contextBridge preserve the placement reason.
+            return failure
+          }
           throw error
         }
         finishAutomationWorkspaceProvenanceRequest(args.automationProvenanceRequest)
