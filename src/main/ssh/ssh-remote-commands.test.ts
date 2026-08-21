@@ -206,6 +206,16 @@ describe('ssh remote command builders', () => {
     )
   })
 
+  it('sorts relay GC candidates before applying the listing cap', () => {
+    const posixCommand = listRelayBaseDirsCommand(posix, '/home/me/.orca-remote')
+    const windowsScript = decodePowerShellCommand(
+      listRelayBaseDirsCommand(windows, 'C:/Users/me/.orca-remote')
+    )
+
+    expect(posixCommand).toContain('LC_ALL=C sort')
+    expect(windowsScript).toMatch(/Sort-Object Name\s*\|\s*Select-Object -First/)
+  })
+
   it('bounds real POSIX GC output with more than the exec-cap stage population', async () => {
     const root = mkdtempSync(join(tmpdir(), 'orca-relay-gc-scale-'))
     try {

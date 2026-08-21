@@ -2,6 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callMock = vi.fn()
 const originalExitCode = process.exitCode
+const ambientOrchestrationEnv = [
+  'ORCA_DEV_CLI_INVOCATION',
+  'ORCA_USER_DATA_PATH',
+  'ORCA_TERMINAL_HANDLE',
+  'ORCA_PANE_KEY',
+  'ORCA_APP_EXECUTABLE',
+  'ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT'
+] as const
 
 vi.mock('../format', () => ({ printResult: vi.fn() }))
 vi.mock('../selectors', () => ({ getTerminalHandle: vi.fn() }))
@@ -14,10 +22,14 @@ describe('orchestration worker-start CLI contract', () => {
     callMock.mockReset()
     vi.mocked(printResult).mockReset()
     process.exitCode = undefined
+    for (const name of ambientOrchestrationEnv) {
+      vi.stubEnv(name, undefined)
+    }
   })
 
   afterEach(() => {
     process.exitCode = originalExitCode
+    vi.unstubAllEnvs()
   })
 
   const invokeWorkerStart = (flags: Map<string, string | boolean>) =>
