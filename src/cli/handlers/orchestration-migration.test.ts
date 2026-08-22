@@ -1,14 +1,23 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_HANDLERS } from './orchestration'
 
-const originalPaneKey = process.env.ORCA_PANE_KEY
+const ambientOrchestrationEnv = [
+  'ORCA_DEV_CLI_INVOCATION',
+  'ORCA_USER_DATA_PATH',
+  'ORCA_TERMINAL_HANDLE',
+  'ORCA_PANE_KEY',
+  'ORCA_APP_EXECUTABLE',
+  'ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT'
+] as const
+
+beforeEach(() => {
+  for (const name of ambientOrchestrationEnv) {
+    vi.stubEnv(name, undefined)
+  }
+})
 
 afterEach(() => {
-  if (originalPaneKey === undefined) {
-    delete process.env.ORCA_PANE_KEY
-  } else {
-    process.env.ORCA_PANE_KEY = originalPaneKey
-  }
+  vi.unstubAllEnvs()
 })
 
 describe('orchestration CLI migration recovery', () => {

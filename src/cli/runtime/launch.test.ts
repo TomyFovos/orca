@@ -21,6 +21,23 @@ vi.mock('child_process', () => ({
   spawn: spawnMock
 }))
 
+const ambientLaunchEnv = [
+  'ORCA_DEV_CLI_INVOCATION',
+  'ORCA_USER_DATA_PATH',
+  'ORCA_TERMINAL_HANDLE',
+  'ORCA_PANE_KEY',
+  'ORCA_APP_EXECUTABLE',
+  'ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT',
+  'ORCA_OPEN_COMMAND',
+  'ORCA_APPIMAGE_NO_SANDBOX'
+] as const
+
+function isolateLaunchEnvironment(): void {
+  for (const name of ambientLaunchEnv) {
+    vi.stubEnv(name, undefined)
+  }
+}
+
 import { launchOrcaApp, serveOrcaApp } from './launch'
 
 class FakeChildProcess extends EventEmitter {
@@ -86,18 +103,16 @@ describe('serveOrcaApp', () => {
 
   beforeEach(() => {
     spawnMock.mockReset()
+    isolateLaunchEnvironment()
     process.env.ORCA_APP_EXECUTABLE = '/Applications/Orca.app/Contents/MacOS/Orca'
   })
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.restoreAllMocks()
-    delete process.env.ORCA_APP_EXECUTABLE
-    delete process.env.ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT
-    delete process.env.ORCA_APPIMAGE_NO_SANDBOX
-    delete process.env.ORCA_USER_DATA_PATH
-    return Promise.all(
+    await Promise.all(
       temporaryDirectories.splice(0).map((directory) => rm(directory, { recursive: true }))
     )
+    vi.unstubAllEnvs()
   })
 
   it.runIf(process.platform === 'darwin')(
@@ -599,12 +614,11 @@ describe('serveOrcaApp', () => {
 describe('launchOrcaApp', () => {
   beforeEach(() => {
     spawnMock.mockReset()
+    isolateLaunchEnvironment()
   })
 
   afterEach(() => {
-    delete process.env.ORCA_OPEN_COMMAND
-    delete process.env.ORCA_APP_EXECUTABLE
-    delete process.env.ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT
+    vi.unstubAllEnvs()
   })
 
   it('handles asynchronous detached spawn errors without throwing', async () => {

@@ -2,8 +2,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const callMock = vi.fn()
 const getTerminalHandleMock = vi.hoisted(() => vi.fn())
-const originalTerminalHandle = process.env.ORCA_TERMINAL_HANDLE
-const originalPaneKey = process.env.ORCA_PANE_KEY
+const ambientOrchestrationEnv = [
+  'ORCA_DEV_CLI_INVOCATION',
+  'ORCA_USER_DATA_PATH',
+  'ORCA_TERMINAL_HANDLE',
+  'ORCA_PANE_KEY',
+  'ORCA_APP_EXECUTABLE',
+  'ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT'
+] as const
+
+function isolateOrchestrationEnvironment(): void {
+  for (const name of ambientOrchestrationEnv) {
+    vi.stubEnv(name, undefined)
+  }
+}
 function lifecycleGroupRecipientError(type: 'worker_done' | 'heartbeat'): string {
   return `${type} messages belong to one exact Dispatch and cannot target a group address.`
 }
@@ -34,18 +46,11 @@ function stubStaleHandleRemintFailure(error: RuntimeClientError): void {
   callMock.mockRejectedValueOnce(staleHandleError()).mockRejectedValueOnce(error)
 }
 
+beforeEach(isolateOrchestrationEnvironment)
+
 afterEach(() => {
   getTerminalHandleMock.mockReset()
-  if (originalTerminalHandle === undefined) {
-    delete process.env.ORCA_TERMINAL_HANDLE
-  } else {
-    process.env.ORCA_TERMINAL_HANDLE = originalTerminalHandle
-  }
-  if (originalPaneKey === undefined) {
-    delete process.env.ORCA_PANE_KEY
-  } else {
-    process.env.ORCA_PANE_KEY = originalPaneKey
-  }
+  vi.unstubAllEnvs()
 })
 
 describe('orchestration send structured payload flags', () => {
@@ -63,6 +68,32 @@ describe('orchestration send structured payload flags', () => {
       cwd: '/tmp/repo',
       json: true
     } as never)
+
+  it('keeps ambient Orca process variables out of handler calls', async () => {
+    expect(ambientOrchestrationEnv.map((name) => process.env[name])).toEqual([
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined
+    ])
+
+    await invokeSend(
+      new Map<string, string | boolean>([
+        ['from', 'term_worker'],
+        ['to', 'term_coord'],
+        ['subject', 'done'],
+        ['type', 'worker_done'],
+        ['outcome', 'succeeded']
+      ])
+    )
+
+    expect(callMock).toHaveBeenCalledWith(
+      'orchestration.send',
+      expect.objectContaining({ devMode: false })
+    )
+  })
 
   it('serializes common worker payload fields as JSON', async () => {
     await invokeSend(

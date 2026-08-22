@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { OrchestrationDb } from './db'
 import { reconcileLifecycleMessage } from './lifecycle-reconciliation'
 import {
@@ -107,11 +107,27 @@ function insertWorkerDone(
   })
 }
 
+const ambientOrchestrationEnv = [
+  'ORCA_DEV_CLI_INVOCATION',
+  'ORCA_USER_DATA_PATH',
+  'ORCA_TERMINAL_HANDLE',
+  'ORCA_PANE_KEY',
+  'ORCA_APP_EXECUTABLE',
+  'ORCA_APP_EXECUTABLE_NEEDS_APP_ROOT'
+] as const
+
 describe('Coordinator', () => {
   let db: OrchestrationDb
 
+  beforeEach(() => {
+    for (const name of ambientOrchestrationEnv) {
+      vi.stubEnv(name, undefined)
+    }
+  })
+
   afterEach(() => {
     db?.close()
+    vi.unstubAllEnvs()
   })
 
   it('throws if no tasks exist', async () => {
