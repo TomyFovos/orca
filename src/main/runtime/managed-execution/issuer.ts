@@ -7,6 +7,10 @@ import {
 } from './authorization'
 import { createHash } from 'node:crypto'
 import { canonicalBytes } from './canonical'
+import {
+  findBindingPayloadEquivalenceViolation,
+  findOperationPayloadContractViolation
+} from './execution-request-contract'
 
 const MAX_EXPIRY_DURATION_MS = 5 * 60 * 1000 // 5分
 const MAX_CLOCK_SKEW_MS = 60 * 1000 // 1分
@@ -43,10 +47,13 @@ export enum IssuerErrorCode {
   FUTURE_ISSUED_AT = 'FUTURE_ISSUED_AT',
   INVALID_BINDING = 'INVALID_BINDING',
   PAYLOAD_DIGEST_MISMATCH = 'PAYLOAD_DIGEST_MISMATCH',
+  BINDING_PAYLOAD_MISMATCH = 'BINDING_PAYLOAD_MISMATCH',
   REPLAY_ATTACK = 'REPLAY_ATTACK',
   REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD = 'REQUEST_ID_REUSED_WITH_DIFFERENT_PAYLOAD',
   RECEIPT_STORE_CAPACITY_EXCEEDED = 'RECEIPT_STORE_CAPACITY_EXCEEDED',
   UNSUPPORTED_OPERATION = 'UNSUPPORTED_OPERATION',
+  INVALID_OPERATION_PAYLOAD = 'INVALID_OPERATION_PAYLOAD',
+  PROTECTED_EFFECT_REFUSED = 'PROTECTED_EFFECT_REFUSED',
   MALFORMED_REQUEST = 'MALFORMED_REQUEST'
 }
 
@@ -109,6 +116,23 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
     })
   }
 
+  // Agents can bypass their own controls, so Orca binds the authorized values to worker input.
+  const bindingPayloadViolation = findBindingPayloadEquivalenceViolation(
+    envelope.binding,
+    envelope.payload
+  )
+  if (bindingPayloadViolation) {
+    throw new IssuerError(
+      IssuerErrorCode.BINDING_PAYLOAD_MISMATCH,
+      'binding and payload values must match',
+      {
+        layer: 'binding',
+        field: bindingPayloadViolation.field,
+        rule: bindingPayloadViolation.rule
+      }
+    )
+  }
+
   // 4. replay を期限判定より先に照合する。期限切れ既知 request を replayed と区別し、
   //    呼び出し側が新しい request_id で二重実行することを防ぐ。
   const bindingCanonical = canonicalBytes(envelope.binding).toString('utf8')
@@ -146,6 +170,24 @@ export function mintAuthorization(envelope: ExecuteRequest): ManagedExecutionAut
         layer: 'binding',
         field: 'operation',
         rule: 'supported-operation'
+      }
+    )
+  }
+
+  // Agents may bypass their own approval and sandbox controls, so Orca verifies
+  // operation-specific effect inputs before minting an executable capability.
+  const operationPayloadViolation = findOperationPayloadContractViolation(
+    envelope.binding.operation,
+    envelope.payload
+  )
+  if (operationPayloadViolation) {
+    throw new IssuerError(
+      IssuerErrorCode.INVALID_OPERATION_PAYLOAD,
+      'operation payload violates the execution request contract',
+      {
+        layer: 'payload',
+        field: operationPayloadViolation.field,
+        rule: operationPayloadViolation.rule
       }
     )
   }
