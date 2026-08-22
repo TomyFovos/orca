@@ -1,6 +1,14 @@
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync
+} from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, isAbsolute, join, relative, sep } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Repo } from '../../../../shared/types'
 import {
@@ -24,11 +32,42 @@ const isPosix = process.platform !== 'win32'
 
 const createdTempDirs: string[] = []
 
-/** A base whose ancestors are world-traversable, as an isolated worker's UID requires. */
+function fixtureParent(): string {
+  return isPosix ? '/tmp' : tmpdir()
+}
+
+function assertWorldTraversableAncestors(path: string): void {
+  if (!isPosix) {
+    return
+  }
+
+  let current = path
+  for (;;) {
+    if ((statSync(current).mode & 0o001) === 0) {
+      throw new Error(`Test fixture parent must be world-traversable: ${current} lacks o+x`)
+    }
+    const parent = dirname(current)
+    if (parent === current) {
+      return
+    }
+    current = parent
+  }
+}
+
+function isInsideOrEqual(target: string, base: string): boolean {
+  if (target === base) {
+    return true
+  }
+  const relation = relative(base, target)
+  return relation !== '' && relation !== '..' && !relation.startsWith(`..${sep}`) && !isAbsolute(relation)
+}
+
+/** A test-controlled base whose ancestors an isolated worker can traverse. */
 function makeReachableBase(): string {
-  const base = mkdtempSync(join(tmpdir(), 'orca-managed-worktree-'))
+  const parent = fixtureParent()
+  assertWorldTraversableAncestors(parent)
+  const base = mkdtempSync(join(parent, 'orca-managed-worktree-'))
   createdTempDirs.push(base)
-  // mkdtemp always creates 0700; a managed root has to be reachable, so widen the fixture itself.
   chmodSync(base, 0o755)
   return base
 }
@@ -46,7 +85,12 @@ const localRepo = { path: '/srv/repos/alpha', worktreeBasePath: undefined } as P
 const settings = { workspaceDir: `${homedir()}/orca/workspaces`, nestWorkspaces: false }
 
 function envWith(root?: string): NodeJS.ProcessEnv {
-  return { HOME: homedir(), ...(root === undefined ? {} : { [MANAGED_WORKTREE_ROOT_ENV]: root }) }
+  const home = join(makeReachableBase(), 'home')
+  mkdirSync(home, { mode: 0o755 })
+  if (root !== undefined && isInsideOrEqual(root, home)) {
+    throw new Error(`Test fixture root must be outside its declared HOME: ${root}`)
+  }
+  return { HOME: home, ...(root === undefined ? {} : { [MANAGED_WORKTREE_ROOT_ENV]: root }) }
 }
 
 afterEach(() => {

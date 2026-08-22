@@ -1971,10 +1971,19 @@ describe('GitHandler', () => {
       // Why: the catch only swallows "no upstream"; other errors must surface so auth/corruption failures aren't masked.
       const nonRepoDir = path.join(tmpDir, 'not-a-repo')
       await fs.mkdir(nonRepoDir, { recursive: true })
-
-      await expect(
-        dispatcher.callRequest('git.upstreamStatus', { worktreePath: nonRepoDir })
-      ).rejects.toThrow(/not a git repository/i)
+      const previousDiscovery = process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM
+      process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM = '1'
+      try {
+        await expect(
+          dispatcher.callRequest('git.upstreamStatus', { worktreePath: nonRepoDir })
+        ).rejects.toThrow(/not a git repository/i)
+      } finally {
+        if (previousDiscovery === undefined) {
+          delete process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM
+        } else {
+          process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM = previousDiscovery
+        }
+      }
     })
   })
 
