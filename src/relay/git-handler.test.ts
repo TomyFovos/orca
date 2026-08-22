@@ -1971,6 +1971,8 @@ describe('GitHandler', () => {
       // Why: the catch only swallows "no upstream"; other errors must surface so auth/corruption failures aren't masked.
       const nonRepoDir = path.join(tmpDir, 'not-a-repo')
       await fs.mkdir(nonRepoDir, { recursive: true })
+      // Why: git halts discovery at a mount boundary, so the error text would otherwise depend on
+      // which filesystem TMPDIR lives on. Force the traversal so the "not a repository" path is reached.
       const previousDiscovery = process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM
       process.env.GIT_DISCOVERY_ACROSS_FILESYSTEM = '1'
       try {

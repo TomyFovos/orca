@@ -32,6 +32,8 @@ const isPosix = process.platform !== 'win32'
 
 const createdTempDirs: string[] = []
 
+// Why: the ambient TMPDIR may sit inside $HOME or under a 0700 ancestor, either of which trips a
+// different rejection than the one under test. Pin the location instead of reading the environment.
 function fixtureParent(): string {
   return isPosix ? '/tmp' : tmpdir()
 }
@@ -68,6 +70,7 @@ function makeReachableBase(): string {
   assertWorldTraversableAncestors(parent)
   const base = mkdtempSync(join(parent, 'orca-managed-worktree-'))
   createdTempDirs.push(base)
+  // mkdtemp always creates 0700; a managed root has to be reachable by the isolated worker's UID.
   chmodSync(base, 0o755)
   return base
 }
