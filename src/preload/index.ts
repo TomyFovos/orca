@@ -215,6 +215,10 @@ import type { AgentKind, LaunchSource, RequestKind } from '../shared/telemetry-e
 import { createBrowserFindSubscriptions } from './browser-find-subscriptions'
 import type { AppStarSource } from '../shared/gh-star-source'
 import type { ExecutionHostId } from '../shared/execution-host'
+import {
+  isManagedWorktreePlacementIpcFailure,
+  type WorktreeCreateIpcResult
+} from '../shared/worktree-create-ipc'
 import type {
   Automation,
   AutomationCreateInput,
@@ -762,7 +766,15 @@ const api = {
 
     listAll: () => ipcRenderer.invoke('worktrees:listAll'),
 
-    create: (args) => ipcRenderer.invoke('worktrees:create', args),
+    create: async (args) => {
+      const result = (await ipcRenderer.invoke('worktrees:create', args)) as WorktreeCreateIpcResult
+      if (isManagedWorktreePlacementIpcFailure(result)) {
+        // Why: ipcMain serializes rejected Error properties away; reject this tagged plain value
+        // after invoke so contextBridge copies code/data instead of an Error wrapper.
+        throw result
+      }
+      return result
+    },
 
     onCreateProgress: (
       callback: (data: { creationId?: string; phase: 'fetching' | 'creating' }) => void

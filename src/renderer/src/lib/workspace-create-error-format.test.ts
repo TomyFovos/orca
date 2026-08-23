@@ -4,6 +4,20 @@ import {
   getWorkspaceCreateErrorToastMessage
 } from './workspace-create-error-format'
 
+function placementFailure(code: string) {
+  return {
+    kind: 'managed_worktree_placement_rejected' as const,
+    code: 'managed_worktree_placement_unavailable' as const,
+    data: {
+      code,
+      field: 'ORCA_MANAGED_WORKTREE_ROOT',
+      rule: 'managed-policy',
+      detail: 'test detail'
+    },
+    message: 'same message for every placement failure'
+  }
+}
+
 describe('formatWorkspaceCreateError', () => {
   it('returns guidance for missing default base ref failures', () => {
     const error = new Error(
@@ -37,5 +51,23 @@ describe('formatWorkspaceCreateError', () => {
       message: 'fatal: not a git repository'
     })
     expect(getWorkspaceCreateErrorToastMessage(formatted)).toBe('fatal: not a git repository')
+  })
+
+  it('uses structured placement data to distinguish unset from unreachable roots', () => {
+    const unset = formatWorkspaceCreateError(placementFailure('unset'))
+    const notTraversable = formatWorkspaceCreateError(placementFailure('not_traversable'))
+
+    expect(unset).toEqual({
+      title: 'Managed worktree root is not configured',
+      message:
+        'Managed profile requires a dedicated worktree root before it can create a workspace.',
+      help: 'Set ORCA_MANAGED_WORKTREE_ROOT to an absolute, reachable directory, then retry.'
+    })
+    expect(notTraversable).toEqual({
+      title: 'Managed worktree root is unreachable',
+      message: 'The isolated worker cannot reach the configured managed worktree root.',
+      help: 'Choose a root whose ancestors are world-traversable; do not loosen permissions, then retry.'
+    })
+    expect(unset).not.toEqual(notTraversable)
   })
 })
