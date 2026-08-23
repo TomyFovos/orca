@@ -356,6 +356,28 @@ describe('managed execution endpoint authorization path', () => {
     }
   })
 
+  it('keeps a response socket alive while the protected effect outlasts body ingress', async () => {
+    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
+    const server = await startManagedExecutionEndpoint({
+      port: 0,
+      bodyReadTimeoutMs: 30,
+      onProtectedEffect: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 80))
+      }
+    })
+    expect(server).not.toBeNull()
+
+    try {
+      const port = (server!.address() as AddressInfo).port
+      const response = await postExecute(port, createSignedRequest())
+
+      expect(response.status).toBe(200)
+      expect(response.receipt).toMatchObject({ outcome: 'accepted' })
+    } finally {
+      await closeServer(server!)
+    }
+  })
+
   it('records an aborted TCP body without writing to the closed socket', async () => {
     setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
     const server = await startManagedExecutionEndpoint({ port: 0 })

@@ -3,20 +3,22 @@ import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runti
 import { isAuthorityRegistryLoaded } from './authority-registry'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from './issuer'
 import { assertManagedExecutionAuthorized } from './authorization'
-import {
-  MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS,
-  RequestBodyReadError,
-  readManagedExecutionRequestBody
-} from './request-body-reader'
+import { RequestBodyReadError, readManagedExecutionRequestBody } from './request-body-reader'
 import { ManagedExecutionReceiptStore } from './managed-execution-receipt-store'
-
-const DEFAULT_PORT = 6770
-const DEFAULT_HOST = '127.0.0.1'
+import {
+  applyManagedExecutionTimeouts,
+  resolveManagedExecutionBodyReadTimeout
+} from './endpoint-timeouts'
+import {
+  DEFAULT_MANAGED_EXECUTION_HOST,
+  listenForManagedExecutionStartup,
+  resolveManagedExecutionPort
+} from './endpoint-startup'
 
 export type EndpointConfig = {
   host?: string
   port?: number
-  onProtectedEffect?: (payload: ExecuteRequest['payload']) => void
+  onProtectedEffect?: (payload: ExecuteRequest['payload']) => void | Promise<void>
   bodyReadTimeoutMs?: number
   receiptStore?: ManagedExecutionReceiptStore<StoredAcceptedReceipt>
 }
@@ -65,9 +67,10 @@ export async function startManagedExecutionEndpoint(
     return null
   }
 
-  const host = config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_HOST
-  const port = resolvePort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
-  const bodyReadTimeoutMs = resolveBodyReadTimeout(config.bodyReadTimeoutMs)
+  const host =
+    config.host ?? process.env.ORCA_MANAGED_ENDPOINT_HOST ?? DEFAULT_MANAGED_EXECUTION_HOST
+  const port = resolveManagedExecutionPort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
+  const bodyReadTimeoutMs = resolveManagedExecutionBodyReadTimeout(config.bodyReadTimeoutMs)
   const receiptStore = config.receiptStore ?? completedReceipts
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
@@ -88,7 +91,7 @@ export async function startManagedExecutionEndpoint(
       const acceptedEnvelope = parsedEnvelope
       envelope = acceptedEnvelope
 
-      await runSerializedManagedExecution(() => {
+      await runSerializedManagedExecution(async () => {
         // Why: a launched agent may bypass approvals and sandbox; Orca must enforce
         // the receipt bound before minting authority or running the protected effect.
         if (!receiptStore.has(acceptedEnvelope.binding.request_id) && receiptStore.isAtCapacity) {
@@ -108,7 +111,7 @@ export async function startManagedExecutionEndpoint(
 
         // 保護された効果を実行。実装は設定された managed runtime callback に委譲する。
         assertManagedExecutionAuthorized(acceptedEnvelope.binding.operation, authorization)
-        config.onProtectedEffect?.(acceptedEnvelope.payload)
+        await config.onProtectedEffect?.(acceptedEnvelope.payload)
 
         // 成功応答（execution-receipt/1 準拠、outcome=accepted）
         const receipt: StoredAcceptedReceipt['receipt'] = {
@@ -197,12 +200,10 @@ export async function startManagedExecutionEndpoint(
       }
     }
   })
-  server.headersTimeout = bodyReadTimeoutMs
-  server.requestTimeout = bodyReadTimeoutMs
-  server.setTimeout(bodyReadTimeoutMs)
+  applyManagedExecutionTimeouts(server, bodyReadTimeoutMs)
 
   try {
-    await listenForStartup(server, port, host)
+    await listenForManagedExecutionStartup(server, port, host)
   } catch (error) {
     console.error(
       `[managed-execution] Failed to listen on ${host}:${port}: ${
@@ -220,66 +221,13 @@ export async function startManagedExecutionEndpoint(
   return server
 }
 
-function resolvePort(configPort: number | undefined, environmentPort: string | undefined): number {
-  if (configPort !== undefined) {
-    return validatePort(configPort, 'endpoint configuration')
-  }
-  if (environmentPort === undefined) {
-    return DEFAULT_PORT
-  }
-  return validatePort(Number(environmentPort), 'ORCA_MANAGED_ENDPOINT_PORT')
-}
-
-function runSerializedManagedExecution(task: () => void): Promise<void> {
+function runSerializedManagedExecution(task: () => void | Promise<void>): Promise<void> {
   const next = managedExecutionTail.then(task, task)
   managedExecutionTail = next.then(
     () => undefined,
     () => undefined
   )
   return next
-}
-
-function validatePort(value: number, source: string): number {
-  if (!Number.isInteger(value) || value < 0 || value > 65_535) {
-    throw new Error(`${source} must be an integer between 0 and 65535`)
-  }
-  return value
-}
-
-function resolveBodyReadTimeout(value: number | undefined): number {
-  if (value === undefined) {
-    return MANAGED_EXECUTION_BODY_READ_TIMEOUT_MS
-  }
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error('bodyReadTimeoutMs must be a positive integer')
-  }
-  return value
-}
-
-function listenForStartup(server: Server, port: number, host: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const onListening = () => {
-      cleanup()
-      resolve()
-    }
-    const onError = (error: Error) => {
-      cleanup()
-      reject(error)
-    }
-    const cleanup = () => {
-      server.off('listening', onListening)
-      server.off('error', onError)
-    }
-
-    server.once('listening', onListening)
-    server.once('error', onError)
-    try {
-      server.listen(port, host)
-    } catch (error) {
-      cleanup()
-      reject(error)
-    }
-  })
 }
 
 type JsonRecord = Record<string, unknown>
