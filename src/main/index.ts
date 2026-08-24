@@ -72,7 +72,10 @@ import {
   setProcessRuntimeProfile,
   MANAGED_ORCA_RUNTIME_PROFILE
 } from './runtime/runtime-profile'
-import { assertManagedExecutionAuthorized } from './runtime/managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from './runtime/managed-execution/authorization'
 import { isAuthorityRegistryLoaded } from './runtime/managed-execution/authority-registry'
 import { startManagedExecutionEndpoint } from './runtime/managed-execution/endpoint'
 import { IssuerError, IssuerErrorCode } from './runtime/managed-execution/issuer'
@@ -2420,7 +2423,9 @@ void app.whenReady().then(async () => {
           // Why: this callback launches the worker directly in serve mode, so
           // enforce the same managed-control-plane boundary even if a future
           // service path reaches it without AutomationService.requestDispatch.
-          assertManagedExecutionAuthorized('automation worker startup')
+          assertManagedExecutionAuthorized(
+            MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS.automationWorkerStartup
+          )
           const terminalSnapshotLimit = 2_000
           let terminalHandle: string
           let terminalSessionId: string | null = null

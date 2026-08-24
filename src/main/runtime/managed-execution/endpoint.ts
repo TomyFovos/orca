@@ -2,7 +2,7 @@ import { createServer, type Server, type IncomingMessage, type ServerResponse } 
 import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runtime-profile'
 import { isAuthorityRegistryLoaded } from './authority-registry'
 import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } from './issuer'
-import { assertManagedExecutionAuthorized } from './authorization'
+import { assertExternalManagedExecutionAuthorized } from './authorization'
 import { RequestBodyReadError, readManagedExecutionRequestBody } from './request-body-reader'
 import { ManagedExecutionReceiptStore } from './managed-execution-receipt-store'
 import {
@@ -110,7 +110,8 @@ export async function startManagedExecutionEndpoint(
         const authorization = mintAuthorization(acceptedEnvelope)
 
         // 保護された効果を実行。実装は設定された managed runtime callback に委譲する。
-        assertManagedExecutionAuthorized(acceptedEnvelope.binding.operation, authorization)
+        // 外部由来の operation は型で固定できないため、未知値も拒否できる external 版で検証する。
+        assertExternalManagedExecutionAuthorized(acceptedEnvelope.binding.operation, authorization)
         await config.onProtectedEffect?.(acceptedEnvelope.payload)
 
         // 成功応答（execution-receipt/1 準拠、outcome=accepted）

@@ -15,13 +15,17 @@ import { resolveAutomationRunTarget, type AutomationRunTargetResult } from './ru
 import { collectAutomationRunUsage } from './run-usage-collection'
 import type { HeadlessAutomationDispatcher } from './headless-dispatch'
 import { clearAutomationDispatchTokens, createAutomationDispatchToken } from './dispatch-tokens'
-import { assertManagedExecutionAuthorized } from '../runtime/managed-execution/authorization'
+import {
+  assertManagedExecutionAuthorized,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
+} from '../runtime/managed-execution/authorization'
 import {
   didAutomationPrecheckPass,
   formatAutomationPrecheckFailure
 } from '../../shared/automation-precheck'
 
 const DEFAULT_TICK_MS = 60 * 1000
+const { automationWorkerStartup } = MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
 
 export class AutomationService {
   private readonly store: Store
@@ -212,11 +216,9 @@ export class AutomationService {
     automation: Automation,
     run: AutomationRun
   ): Promise<AutomationRun> {
-    // Why: automation dispatch ultimately starts an agent. In managed mode the
-    // external control plane must supply the process-local capability at this
-    // side-effect boundary; renderer dispatch tokens are serializable and cannot
-    // authorize a worker launch.
-    assertManagedExecutionAuthorized('automation worker startup')
+    // Managed mode requires a process-local capability at every worker-launch boundary:
+    // serializable renderer tokens cannot authorize a launch.
+    assertManagedExecutionAuthorized(automationWorkerStartup)
     const target = resolveAutomationRunTarget(this.store, automation, {
       allowRemoteHostScheduling: this.allowRemoteHostScheduling
     })
@@ -274,10 +276,8 @@ export class AutomationService {
       })
     }
     try {
-      // Why: retain this guard at the headless effect site as well. A future
-      // caller that bypasses requestDispatch must not silently regain a worker
-      // startup path in managed mode.
-      assertManagedExecutionAuthorized('automation worker startup')
+      // Keep the headless guard so bypassing requestDispatch cannot restore launch authority.
+      assertManagedExecutionAuthorized(automationWorkerStartup)
       const launch = await this.headlessDispatcher!({ automation, run, target })
       const launchRunTarget = {
         workspaceId: launch.workspaceId,
