@@ -7,7 +7,7 @@ import * as os from 'node:os'
 import * as path from 'node:path'
 import { isAuthorityRegistryLoaded } from '../authority-registry'
 import { canonicalBytes } from '../canonical'
-import { startManagedExecutionEndpoint, type StoredAcceptedReceipt } from '../endpoint'
+import { startManagedExecutionEndpoint, type StoredAcceptedReceipt } from './managed-execution-test-endpoint'
 import { ManagedExecutionReceiptStore } from '../managed-execution-receipt-store'
 import { MAX_MANAGED_EXECUTION_BODY_BYTES } from '../request-body-reader'
 import {
