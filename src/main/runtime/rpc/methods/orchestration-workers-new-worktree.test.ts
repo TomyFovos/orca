@@ -12,6 +12,19 @@ import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
 import { setProcessRuntimeProfile } from '../../runtime-profile'
 
+const profileState = vi.hoisted(() => ({ value: 'default' as 'default' | 'managed' }))
+
+vi.mock('../../runtime-profile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../runtime-profile')>()
+  return {
+    ...actual,
+    getProcessRuntimeProfile: () => profileState.value,
+    setProcessRuntimeProfile: (profile: 'default' | 'managed') => {
+      profileState.value = profile
+    }
+  }
+})
+
 vi.mock('../../managed-execution/authorization', () => ({
   assertManagedExecutionAuthorized: () => undefined,
   MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS: {

@@ -14,6 +14,18 @@ import {
 
 const isPosix = process.platform !== 'win32'
 const createdTempDirs: string[] = []
+const profileState = vi.hoisted(() => ({ value: 'default' as 'default' | 'managed' }))
+
+vi.mock('../../runtime-profile', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../runtime-profile')>()
+  return {
+    ...actual,
+    getProcessRuntimeProfile: () => profileState.value,
+    setProcessRuntimeProfile: (profile: 'default' | 'managed') => {
+      profileState.value = profile
+    }
+  }
+})
 
 function makeReachableBase(): string {
   const base = mkdtempSync(join(tmpdir(), 'orca-managed-worker-git-'))
