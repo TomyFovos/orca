@@ -244,6 +244,84 @@ describe('orchestration new-worktree workers', () => {
     }
   })
 
+  it.each(['reachable-remote', 'ssh-unvalidatable'])(
+    'rejects managed federated start for %s before any remote or local effect',
+    async (serverSelector) => {
+      setProcessRuntimeProfile('managed')
+      const task = db.createTask({ spec: 'federated task', runId })
+      const method = ORCHESTRATION_METHODS.find(
+        (candidate) => candidate.name === 'orchestration.workerStart'
+      )
+      if (!method) {
+        throw new Error('workerStart method is not registered')
+      }
+      const resolveServer = vi.spyOn(runtime, 'resolveOrchestrationWorkerServer')
+      const callServer = vi.spyOn(runtime, 'callOrchestrationWorkerServer')
+      const createWorktree = vi.spyOn(runtime, 'createManagedWorktree')
+
+      await expect(
+        method.handler(
+          method.params!.parse({
+            task: task.id,
+            from: 'term_coord',
+            on: serverSelector,
+            worktree: 'new-top-level',
+            name: 'remote-worker',
+            agent: 'codex'
+          }),
+          { runtime }
+        )
+      ).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          code: 'git_metadata_unresolvable',
+          layer: 'managed_worker_git_isolation',
+          field: serverSelector,
+          rule: 'local-posix-host-only'
+        }
+      })
+      expect(resolveServer).not.toHaveBeenCalled()
+      expect(callServer).not.toHaveBeenCalled()
+      expect(createWorktree).not.toHaveBeenCalled()
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
+    }
+  )
+
+  it('keeps managed federated rejection on the host-validation rule on Windows', async () => {
+    setProcessRuntimeProfile('managed')
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const task = db.createTask({ spec: 'Windows federated task', runId })
+    const method = ORCHESTRATION_METHODS.find(
+      (candidate) => candidate.name === 'orchestration.workerStart'
+    )
+    if (!method) {
+      platform.mockRestore()
+      throw new Error('workerStart method is not registered')
+    }
+    try {
+      await expect(
+        method.handler(
+          method.params!.parse({
+            task: task.id,
+            from: 'term_coord',
+            on: 'windows-peer',
+            worktree: 'new-top-level',
+            name: 'windows-worker',
+            agent: 'codex'
+          }),
+          { runtime }
+        )
+      ).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: { rule: 'local-posix-host-only' }
+      })
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
   it('rejects a reachable linked gitdir in a new worktree before creating the worker terminal', async () => {
     const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
     setProcessRuntimeProfile('managed')

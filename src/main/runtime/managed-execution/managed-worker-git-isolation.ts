@@ -131,20 +131,20 @@ export function assertManagedWorkerGitIsolated(
   if (getProcessRuntimeProfile() !== MANAGED_ORCA_RUNTIME_PROFILE) {
     return
   }
-  if (process.platform === 'win32') {
-    reject(
-      'git_metadata_unresolvable',
-      worktreePath,
-      'posix-o+x-required',
-      'Windows does not expose the POSIX o+x reachability criterion required for managed worker isolation'
-    )
-  }
   if (options.hostUnvalidatable) {
     reject(
       'git_metadata_unresolvable',
       worktreePath,
       'local-posix-host-only',
       'Git metadata isolation cannot be validated on a remote host'
+    )
+  }
+  if (process.platform === 'win32') {
+    reject(
+      'git_metadata_unresolvable',
+      worktreePath,
+      'posix-o+x-required',
+      'Windows does not expose the POSIX o+x reachability criterion required for managed worker isolation'
     )
   }
   // Why: agents can bypass their own approvals and sandbox, so Orca must enforce metadata isolation before spawn.

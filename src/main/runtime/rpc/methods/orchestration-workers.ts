@@ -52,6 +52,9 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       }
 
       if (params.on) {
+        // Why: the remote host cannot be inspected for Git metadata reachability before dispatch.
+        // Managed execution therefore fails closed instead of allowing a federated side effect.
+        assertManagedWorkerGitIsolated(params.on, { hostUnvalidatable: true })
         return startFederatedWorker({
           params,
           runtime,
