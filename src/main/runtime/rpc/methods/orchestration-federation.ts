@@ -83,15 +83,21 @@ export function createOrchestrationFederationAttachMethods(
       if (agent) {
         runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
       }
+      let resolvedWorktree: Awaited<ReturnType<typeof runtime.showManagedWorktree>> | undefined
       if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
         // Why: a receiver cannot validate Git metadata on a remote connection; reject before
         // accepting the attachment or creating any worktree/terminal side effect.
-        const targetWorktree = createsWorktree
-          ? undefined
-          : await runtime.showManagedWorktree(params.worktree)
-        const repo = await runtime.showRepo(targetWorktree?.repoId ?? (params.repo as string))
+        if (!createsWorktree) {
+          resolvedWorktree = await runtime.showManagedWorktree(params.worktree).catch(() => {
+            throw new OrchestrationError(
+              'worktree_not_found_on_server',
+              `Worktree ${params.worktree} was not found on the selected worker server.`
+            )
+          })
+        }
+        const repo = await runtime.showRepo(resolvedWorktree?.repoId ?? (params.repo as string))
         assertManagedWorkerGitIsolated(
-          targetWorktree?.git?.path ?? repo.path,
+          resolvedWorktree?.git?.path ?? repo.path,
           repo.connectionId ? { hostUnvalidatable: true } : undefined
         )
       }
@@ -179,12 +185,14 @@ export function createOrchestrationFederationAttachMethods(
           )
           appendFederationSetupEffect(effects, setup)
         } else {
-          worktree = await runtime.showManagedWorktree(params.worktree).catch(() => {
-            throw new OrchestrationError(
-              'worktree_not_found_on_server',
-              `Worktree ${params.worktree} was not found on the selected worker server.`
-            )
-          })
+          worktree =
+            resolvedWorktree ??
+            (await runtime.showManagedWorktree(params.worktree).catch(() => {
+              throw new OrchestrationError(
+                'worktree_not_found_on_server',
+                `Worktree ${params.worktree} was not found on the selected worker server.`
+              )
+            }))
           effects.push(
             { kind: 'worktree', action: 'reused', id: worktree.id },
             { kind: 'setup', action: 'not_applicable', state: 'not_applicable' }

@@ -149,6 +149,47 @@ describe('orchestration federated folder placement', () => {
     })
     expect(db.getRemoteDispatchAttachment('ctx_managed_existing')).toBeUndefined()
     expect(createTerminal).not.toHaveBeenCalled()
+    expect(runtime.showManagedWorktree).toHaveBeenCalledOnce()
+  })
+
+  it('maps a missing managed exact worktree before accepting the attachment', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    vi.spyOn(runtime, 'validateOrchestrationAgentLauncher').mockImplementation(() => {})
+    const showWorktree = vi
+      .spyOn(runtime, 'showManagedWorktree')
+      .mockRejectedValue(new Error('not found'))
+    const method = createOrchestrationFederationAttachMethods(() => 'managed').find(
+      (candidate) => candidate.name === 'orchestration.federationAttachStart'
+    )!
+
+    await expect(
+      method.handler(
+        method.params!.parse({
+          dispatchId: 'ctx_managed_missing',
+          taskId: 'task_managed_missing',
+          taskSpec: 'missing managed work',
+          protocolVersion: 1,
+          worktree: 'id:missing-worktree',
+          agent: 'codex'
+        }),
+        {
+          runtime,
+          orchestrationMutation: {
+            callerFingerprint: 'home_peer',
+            requestId: 'request_managed_missing',
+            method: 'orchestration.federationAttachStart',
+            payloadHash: 'managed_missing_payload'
+          }
+        }
+      )
+    ).rejects.toMatchObject({
+      code: 'worktree_not_found_on_server',
+      message: 'Worktree id:missing-worktree was not found on the selected worker server.'
+    })
+    expect(showWorktree).toHaveBeenCalledOnce()
+    expect(db.getRemoteDispatchAttachment('ctx_managed_missing')).toBeUndefined()
   })
 
   it('keeps the default profile federation receiver successful for a local worktree', async () => {
