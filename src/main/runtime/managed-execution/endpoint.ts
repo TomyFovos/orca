@@ -5,6 +5,8 @@ import { mintAuthorization, IssuerError, IssuerErrorCode, type ExecuteRequest } 
 import { assertExternalManagedExecutionAuthorized } from './authorization'
 import { RequestBodyReadError, readManagedExecutionRequestBody } from './request-body-reader'
 import { ManagedExecutionReceiptStore } from './managed-execution-receipt-store'
+import { AttemptIdentityRegistry } from './attempt-identity-registry'
+import { runSerializedManagedExecution } from './managed-execution-request-serialization'
 import {
   applyManagedExecutionTimeouts,
   resolveManagedExecutionBodyReadTimeout
@@ -21,6 +23,7 @@ export type EndpointConfig = {
   onProtectedEffect?: (payload: ExecuteRequest['payload']) => void | Promise<void>
   bodyReadTimeoutMs?: number
   receiptStore?: ManagedExecutionReceiptStore<StoredAcceptedReceipt>
+  attemptIdentities?: AttemptIdentityRegistry
 }
 
 type ExecutionReceipt = {
@@ -50,7 +53,7 @@ export type StoredAcceptedReceipt = {
 
 // Expired identities stay replayable; capacity refuses unknown identities instead of evicting.
 const completedReceipts = new ManagedExecutionReceiptStore<StoredAcceptedReceipt>()
-let managedExecutionTail: Promise<void> = Promise.resolve()
+const acceptedAttemptIdentities = new AttemptIdentityRegistry()
 
 export async function startManagedExecutionEndpoint(
   config: EndpointConfig = {}
@@ -72,6 +75,7 @@ export async function startManagedExecutionEndpoint(
   const port = resolveManagedExecutionPort(config.port, process.env.ORCA_MANAGED_ENDPOINT_PORT)
   const bodyReadTimeoutMs = resolveManagedExecutionBodyReadTimeout(config.bodyReadTimeoutMs)
   const receiptStore = config.receiptStore ?? completedReceipts
+  const attemptIdentities = config.attemptIdentities ?? acceptedAttemptIdentities
 
   const server = createServer(async (req: IncomingMessage, res: ServerResponse) => {
     if (req.method !== 'POST' || req.url !== '/execute') {
@@ -109,10 +113,16 @@ export async function startManagedExecutionEndpoint(
         // 検証と capability mint
         const authorization = mintAuthorization(acceptedEnvelope)
 
+        // Why: mirror AI-DE's known-attempt rule before the protected effect runs.
+        const { attempt_id: attemptId, operation } = acceptedEnvelope.binding
+        const attemptIdentityResolution = attemptIdentities.resolve(attemptId, operation)
+
         // 保護された効果を実行。実装は設定された managed runtime callback に委譲する。
         // 外部由来の operation は型で固定できないため、未知値も拒否できる external 版で検証する。
         assertExternalManagedExecutionAuthorized(acceptedEnvelope.binding.operation, authorization)
         await config.onProtectedEffect?.(acceptedEnvelope.payload)
+
+        attemptIdentities.commit(attemptIdentityResolution)
 
         // 成功応答（execution-receipt/1 準拠、outcome=accepted）
         const receipt: StoredAcceptedReceipt['receipt'] = {
@@ -126,8 +136,8 @@ export async function startManagedExecutionEndpoint(
           schema_version: acceptedEnvelope.binding.schema_version,
           outcome: 'accepted',
           backend_kind: 'orca',
-          backend_ref: 'orca-backend-1',
-          backend_session_id: `session-${Date.now()}`,
+          backend_ref: attemptIdentityResolution.identity.backendRef,
+          backend_session_id: attemptIdentityResolution.identity.backendSessionId,
           accepted_at: new Date().toISOString()
         }
 
@@ -220,15 +230,6 @@ export async function startManagedExecutionEndpoint(
   })
 
   return server
-}
-
-function runSerializedManagedExecution(task: () => void | Promise<void>): Promise<void> {
-  const next = managedExecutionTail.then(task, task)
-  managedExecutionTail = next.then(
-    () => undefined,
-    () => undefined
-  )
-  return next
 }
 
 type JsonRecord = Record<string, unknown>
