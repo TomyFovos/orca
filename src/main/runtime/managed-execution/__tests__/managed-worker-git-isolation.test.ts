@@ -12,9 +12,11 @@ import {
 } from '../managed-worker-git-isolation'
 
 const isPosix = process.platform !== 'win32'
+// Reachability tests must not inherit a caller TMPDIR below a non-traversable home directory.
+const reachableTempRoot = isPosix ? '/tmp' : tmpdir()
 const createdTempDirs: string[] = []
 function makeReachableBase(): string {
-  const base = mkdtempSync(join(tmpdir(), 'orca-managed-worker-git-'))
+  const base = mkdtempSync(join(reachableTempRoot, 'orca-managed-worker-git-'))
   createdTempDirs.push(base)
   chmodSync(base, 0o755)
   return base

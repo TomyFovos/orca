@@ -12,6 +12,9 @@ import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
 import { createOrchestrationWorkerStartMethods } from './orchestration-workers'
 
+// Reachability tests must not inherit a caller TMPDIR below a non-traversable home directory.
+const reachableTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+
 vi.mock('../../managed-execution/authorization', () => ({
   assertManagedExecutionAuthorized: () => undefined,
   MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS: {
@@ -199,7 +202,7 @@ describe('orchestration new-worktree workers', () => {
   })
 
   function configureReachableLinkedGitdir() {
-    const base = mkdtempSync(join(tmpdir(), 'orca-worker-start-git-'))
+    const base = mkdtempSync(join(reachableTempRoot, 'orca-worker-start-git-'))
     chmodSync(base, 0o755)
     const repository = join(base, 'repository')
     const worktreePath = join(base, 'worktree')
