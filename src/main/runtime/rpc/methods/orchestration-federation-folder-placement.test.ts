@@ -1,4 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import { OrchestrationDb } from '../../orchestration/db'
 import { ORCHESTRATION_METHODS } from './orchestration'
@@ -190,6 +193,82 @@ describe('orchestration federated folder placement', () => {
     })
     expect(showWorktree).toHaveBeenCalledOnce()
     expect(db.getRemoteDispatchAttachment('ctx_managed_missing')).toBeUndefined()
+  })
+
+  it('reuses one resolved managed exact worktree through attachment and terminal setup', async () => {
+    db = new OrchestrationDb(':memory:')
+    const runtime = new OrcaRuntimeService()
+    runtime.setOrchestrationDb(db)
+    const workspace = mkdtempSync(join(tmpdir(), 'orca-managed-federation-'))
+    vi.spyOn(runtime, 'validateOrchestrationAgentLauncher').mockImplementation(() => {})
+    const showWorktree = vi.spyOn(runtime, 'showManagedWorktree').mockResolvedValue({
+      id: 'managed-local-worktree',
+      repoId: 'managed-local-repo',
+      git: { path: workspace }
+    } as never)
+    vi.spyOn(runtime, 'showRepo').mockResolvedValue({
+      id: 'managed-local-repo',
+      kind: 'folder',
+      path: workspace,
+      connectionId: null
+    } as never)
+    vi.spyOn(runtime, 'createTerminal').mockResolvedValue({ handle: 'term_managed_worker' } as never)
+    vi.spyOn(runtime, 'waitForTerminal').mockResolvedValue({
+      handle: 'term_managed_worker',
+      condition: 'tui-idle',
+      satisfied: true,
+      status: 'running',
+      exitCode: null
+    })
+    vi.spyOn(runtime, 'getTerminalPaneKey').mockReturnValue('tab_managed:leaf')
+    vi.spyOn(runtime, 'getTerminalProcessIncarnation').mockReturnValue('managed_runtime:pty:1')
+    vi.spyOn(runtime, 'getTerminalOrchestrationCliCommand').mockReturnValue('orca')
+    vi.spyOn(runtime, 'sendTerminalAgentPrompt').mockResolvedValue({
+      handle: 'term_managed_worker',
+      accepted: true,
+      bytesWritten: 1
+    })
+    const method = createOrchestrationFederationAttachMethods(() => 'managed').find(
+      (candidate) => candidate.name === 'orchestration.federationAttachStart'
+    )!
+
+    try {
+      await expect(
+        method.handler(
+          method.params!.parse({
+            dispatchId: 'ctx_managed_success',
+            taskId: 'task_managed_success',
+            taskSpec: 'managed local work',
+            protocolVersion: 1,
+            worktree: 'id:managed-local-worktree',
+            agent: 'codex'
+          }),
+          {
+            runtime,
+            orchestrationMutation: {
+              callerFingerprint: 'home_peer',
+              requestId: 'request_managed_success',
+              method: 'orchestration.federationAttachStart',
+              payloadHash: 'managed_success_payload'
+            }
+          }
+        )
+      ).resolves.toMatchObject({
+        dispatchId: 'ctx_managed_success',
+        state: 'ready',
+        worktreeId: 'managed-local-worktree',
+        terminalHandle: 'term_managed_worker'
+      })
+      expect(showWorktree).toHaveBeenCalledOnce()
+      expect(runtime.createTerminal).toHaveBeenCalledWith('id:managed-local-worktree', {
+        command: 'codex',
+        title: 'worker-task_managed_success',
+        presentation: 'background'
+      })
+      expect(db.getRemoteDispatchAttachment('ctx_managed_success')).toMatchObject({ state: 'ready' })
+    } finally {
+      rmSync(workspace, { recursive: true, force: true })
+    }
   })
 
   it('keeps the default profile federation receiver successful for a local worktree', async () => {

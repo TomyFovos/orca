@@ -8,6 +8,17 @@ class LineageError extends Error {
   }
 }
 
+class ManagedWorkerGitIsolationError extends Error {
+  code = 'managed_worker_git_isolation_required'
+  data = {
+    code: 'git_metadata_unresolvable',
+    layer: 'managed_worker_git_isolation',
+    field: '/remote/worktree',
+    rule: 'local-posix-host-only',
+    detail: 'Git metadata isolation cannot be validated on a remote host'
+  }
+}
+
 describe('mapRuntimeError', () => {
   it.each(['terminal_tab_close_timeout', 'terminal_tab_not_found', 'terminal_tab_pinned'])(
     'preserves the durable terminal tab close failure %s',
@@ -156,5 +167,26 @@ describe('mapRuntimeError', () => {
       },
       _meta: { runtimeId: 'runtime-1' }
     })
+  })
+
+  it('preserves managed Git isolation rejection code and data through RPC mapping', () => {
+    const response = mapRuntimeError(
+      'req_1',
+      { runtimeId: 'runtime-1' },
+      new ManagedWorkerGitIsolationError()
+    )
+
+    expect(response).toMatchObject({
+      ok: false,
+      error: {
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          code: 'git_metadata_unresolvable',
+          layer: 'managed_worker_git_isolation',
+          rule: 'local-posix-host-only'
+        }
+      }
+    })
+    expect(response.error?.code).not.toBe('runtime_error')
   })
 })
