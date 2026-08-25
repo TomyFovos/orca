@@ -10,20 +10,7 @@ import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
-import { setProcessRuntimeProfile } from '../../runtime-profile'
-
-const profileState = vi.hoisted(() => ({ value: 'default' as 'default' | 'managed' }))
-
-vi.mock('../../runtime-profile', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-profile')>()
-  return {
-    ...actual,
-    getProcessRuntimeProfile: () => profileState.value,
-    setProcessRuntimeProfile: (profile: 'default' | 'managed') => {
-      profileState.value = profile
-    }
-  }
-})
+import { createOrchestrationWorkerStartMethods } from './orchestration-workers'
 
 vi.mock('../../managed-execution/authorization', () => ({
   assertManagedExecutionAuthorized: () => undefined,
@@ -40,9 +27,6 @@ describe('orchestration new-worktree workers', () => {
   let runId: string
 
   beforeEach(() => {
-    // Runtime profile is process-global; reset it before each case so worker
-    // scheduling cannot leak a managed profile into default-profile coverage.
-    setProcessRuntimeProfile('default')
     db = new OrchestrationDb(':memory:')
     runtime = new OrcaRuntimeService()
     runtime.setOrchestrationDb(db)
@@ -100,15 +84,20 @@ describe('orchestration new-worktree workers', () => {
   })
 
   afterEach(() => {
-    setProcessRuntimeProfile('default')
     db.close()
   })
 
-  async function startWorker(overrides: Record<string, unknown> = {}) {
-    const task = db.createTask({ spec: 'new-worktree task', runId })
-    const method = ORCHESTRATION_METHODS.find(
+  const managedWorkerStartMethod = createOrchestrationWorkerStartMethods(() => 'managed').find(
+    (candidate) => candidate.name === 'orchestration.workerStart'
+  )!
+
+  async function startWorker(
+    overrides: Record<string, unknown> = {},
+    method = ORCHESTRATION_METHODS.find(
       (candidate) => candidate.name === 'orchestration.workerStart'
     )
+  ) {
+    const task = db.createTask({ spec: 'new-worktree task', runId })
     if (!method) {
       throw new Error('workerStart method is not registered')
     }
@@ -124,11 +113,13 @@ describe('orchestration new-worktree workers', () => {
     return { result, task }
   }
 
-  async function startExistingWorktreeWorker(overrides: Record<string, unknown> = {}) {
-    const task = db.createTask({ spec: 'existing-worktree task', runId })
-    const method = ORCHESTRATION_METHODS.find(
+  async function startExistingWorktreeWorker(
+    overrides: Record<string, unknown> = {},
+    method = ORCHESTRATION_METHODS.find(
       (candidate) => candidate.name === 'orchestration.workerStart'
     )
+  ) {
+    const task = db.createTask({ spec: 'existing-worktree task', runId })
     if (!method) {
       throw new Error('workerStart method is not registered')
     }
@@ -232,7 +223,6 @@ describe('orchestration new-worktree workers', () => {
 
   it('rejects a reachable linked gitdir in an existing worktree before creating the worker terminal', async () => {
     const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
-    setProcessRuntimeProfile('managed')
     vi.mocked(runtime.createTerminal).mockResolvedValue({ handle: 'term_worker' } as never)
     vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
       id: 'repo::worker',
@@ -246,7 +236,7 @@ describe('orchestration new-worktree workers', () => {
     } as never)
 
     try {
-      await expect(startExistingWorktreeWorker()).rejects.toMatchObject({
+      await expect(startExistingWorktreeWorker({}, managedWorkerStartMethod)).rejects.toMatchObject({
         code: 'managed_worker_git_isolation_required',
         data: {
           layer: 'managed_worker_git_isolation',
@@ -263,11 +253,8 @@ describe('orchestration new-worktree workers', () => {
   it.each(['reachable-remote', 'ssh-unvalidatable'])(
     'rejects managed federated start for %s before any remote or local effect',
     async (serverSelector) => {
-      setProcessRuntimeProfile('managed')
       const task = db.createTask({ spec: 'federated task', runId })
-      const method = ORCHESTRATION_METHODS.find(
-        (candidate) => candidate.name === 'orchestration.workerStart'
-      )
+      const method = managedWorkerStartMethod
       if (!method) {
         throw new Error('workerStart method is not registered')
       }
@@ -304,13 +291,72 @@ describe('orchestration new-worktree workers', () => {
     }
   )
 
-  it('keeps managed federated rejection on the host-validation rule on Windows', async () => {
-    setProcessRuntimeProfile('managed')
-    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
-    const task = db.createTask({ spec: 'Windows federated task', runId })
+  it('keeps default-profile federation dispatch available', async () => {
+    const task = db.createTask({ spec: 'default federated task', runId })
+    vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
+      environmentId: 'env_remote',
+      name: 'remote-peer',
+      peerFingerprint: 'peer-fingerprint'
+    } as never)
+    const resolveServer = vi.mocked(runtime.resolveOrchestrationWorkerServer)
+    const callServer = vi.spyOn(runtime, 'callOrchestrationWorkerServer').mockImplementation(
+      async (_environmentId, method, payload) => {
+        if (method === 'status.get') {
+          return {
+            capabilities: [
+              'orchestration.contract.v1',
+              'orchestration.federation.v1'
+            ]
+          } as never
+        }
+        return {
+          dispatchId: (payload as { dispatchId: string }).dispatchId,
+          state: 'failed',
+          failedStage: 'remote_attach',
+          lastError: 'fixture'
+        } as never
+      }
+    )
     const method = ORCHESTRATION_METHODS.find(
       (candidate) => candidate.name === 'orchestration.workerStart'
+    )!
+
+    const result = await method.handler(
+      method.params!.parse({
+        task: task.id,
+        from: 'term_coord',
+        on: 'remote-peer',
+        worktree: 'new-top-level',
+        name: 'remote-worker',
+        repo: 'repo',
+        agent: 'codex'
+      }),
+      {
+        runtime,
+        orchestrationMutation: {
+          callerFingerprint: 'caller',
+          requestId: 'request-default-federation',
+          method: 'orchestration.workerStart',
+          payloadHash: 'payload'
+        }
+      }
     )
+
+    expect(result).toMatchObject({ state: 'failed' })
+    expect(resolveServer).toHaveBeenCalledWith('remote-peer')
+    expect(callServer).toHaveBeenCalledWith(
+      'env_remote',
+      'orchestration.federationAttachStart',
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object)
+    )
+  })
+
+  it('keeps managed federated rejection on the host-validation rule on Windows', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const task = db.createTask({ spec: 'Windows federated task', runId })
+    const method = managedWorkerStartMethod
     if (!method) {
       platform.mockRestore()
       throw new Error('workerStart method is not registered')
@@ -340,7 +386,6 @@ describe('orchestration new-worktree workers', () => {
 
   it('rejects a reachable linked gitdir in a new worktree before creating the worker terminal', async () => {
     const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
-    setProcessRuntimeProfile('managed')
     mockCreatedWorktree()
     const createWorktree = vi.spyOn(runtime, 'createManagedWorktree')
     vi.mocked(runtime.showRepo).mockResolvedValue({
@@ -350,7 +395,7 @@ describe('orchestration new-worktree workers', () => {
     } as never)
 
     try {
-      await expect(startWorker()).rejects.toMatchObject({
+      await expect(startWorker({}, managedWorkerStartMethod)).rejects.toMatchObject({
         code: 'managed_worker_git_isolation_required',
         data: {
           layer: 'managed_worker_git_isolation',

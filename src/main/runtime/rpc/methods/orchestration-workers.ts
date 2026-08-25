@@ -7,7 +7,11 @@ import {
 import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
-import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../../runtime-profile'
+import {
+  getProcessRuntimeProfile,
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  type OrcaRuntimeProfile
+} from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
 import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
@@ -28,7 +32,10 @@ import {
 import { failWorkerStartWithReceipt } from './orchestration-worker-start-receipt'
 
 const { managedWorkerStartup } = MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS
-export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
+export function createOrchestrationWorkerStartMethods(
+  runtimeProfile: () => OrcaRuntimeProfile = getProcessRuntimeProfile
+): RpcMethod[] {
+  return [
   defineMethod({
     name: 'orchestration.workerStart',
     params: WorkerStartParams,
@@ -54,7 +61,9 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       if (params.on) {
         // Why: the remote host cannot be inspected for Git metadata reachability before dispatch.
         // Managed execution therefore fails closed instead of allowing a federated side effect.
-        assertManagedWorkerGitIsolated(params.on, { hostUnvalidatable: true })
+        if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
+          assertManagedWorkerGitIsolated(params.on, { hostUnvalidatable: true })
+        }
         return startFederatedWorker({
           params,
           runtime,
@@ -116,7 +125,7 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
         : requestedWorktree === 'current'
           ? coordinatorWorktree
           : await runtime.showManagedWorktree(requestedWorktree)
-      if (getProcessRuntimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
+      if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
         if (createsWorktree) {
           const workerRepo = await runtime.showRepo(params.repo ?? coordinatorWorktree.repoId)
           assertManagedWorkerGitIsolated(workerRepo.path, {
@@ -322,4 +331,8 @@ export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] = [
       }
     }
   })
-]
+  ]
+}
+
+export const ORCHESTRATION_WORKER_START_METHODS: RpcMethod[] =
+  createOrchestrationWorkerStartMethods()

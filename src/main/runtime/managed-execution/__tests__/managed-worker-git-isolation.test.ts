@@ -5,7 +5,6 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { RpcFailure } from '../../rpc/core'
 import { mapRuntimeError } from '../../rpc/errors'
-import { MANAGED_ORCA_RUNTIME_PROFILE, setProcessRuntimeProfile } from '../../runtime-profile'
 import {
   assertManagedWorkerGitIsolated,
   ManagedWorkerGitIsolationError,
@@ -14,19 +13,6 @@ import {
 
 const isPosix = process.platform !== 'win32'
 const createdTempDirs: string[] = []
-const profileState = vi.hoisted(() => ({ value: 'default' as 'default' | 'managed' }))
-
-vi.mock('../../runtime-profile', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../runtime-profile')>()
-  return {
-    ...actual,
-    getProcessRuntimeProfile: () => profileState.value,
-    setProcessRuntimeProfile: (profile: 'default' | 'managed') => {
-      profileState.value = profile
-    }
-  }
-})
-
 function makeReachableBase(): string {
   const base = mkdtempSync(join(tmpdir(), 'orca-managed-worker-git-'))
   createdTempDirs.push(base)
@@ -55,7 +41,6 @@ function makeLinkedWorktree(): { commonDir: string; worktree: string } {
 }
 
 afterEach(() => {
-  setProcessRuntimeProfile('default')
   vi.unstubAllEnvs()
   // Keep Vitest's global expect extensions (including jest-dom) intact for
   // renderer files that may share this worker. Restore only the spies owned by
@@ -68,7 +53,6 @@ afterEach(() => {
 
 describe('managed worker Git isolation', () => {
   beforeEach(() => {
-    setProcessRuntimeProfile(MANAGED_ORCA_RUNTIME_PROFILE)
     vi.spyOn(console, 'error').mockImplementation(() => {})
   })
 

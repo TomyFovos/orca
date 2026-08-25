@@ -1,7 +1,6 @@
 import { execFileSync } from 'node:child_process'
 import { realpathSync, statSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
-import { getProcessRuntimeProfile, MANAGED_ORCA_RUNTIME_PROFILE } from '../runtime-profile'
 
 export type ManagedWorkerGitIsolationRejection = Readonly<{
   code: 'git_metadata_reachable' | 'git_metadata_unresolvable'
@@ -128,9 +127,6 @@ export function assertManagedWorkerGitIsolated(
   worktreePath: string,
   options: { hostUnvalidatable?: boolean } = {}
 ): void {
-  if (getProcessRuntimeProfile() !== MANAGED_ORCA_RUNTIME_PROFILE) {
-    return
-  }
   if (options.hostUnvalidatable) {
     reject(
       'git_metadata_unresolvable',
