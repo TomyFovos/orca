@@ -13,7 +13,10 @@ import { ORCHESTRATION_METHODS } from './orchestration'
 import { setProcessRuntimeProfile } from '../../runtime-profile'
 
 vi.mock('../../managed-execution/authorization', () => ({
-  assertManagedExecutionAuthorized: () => undefined
+  assertManagedExecutionAuthorized: () => undefined,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS: {
+    managedWorkerStartup: 'managed worker startup'
+  }
 }))
 
 describe('orchestration new-worktree workers', () => {
