@@ -2,6 +2,12 @@ import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
+import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
+import {
+  getProcessRuntimeProfile,
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  type OrcaRuntimeProfile
+} from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
 import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
 import {
@@ -19,7 +25,10 @@ import {
 import { FederationAttachStartParams } from './orchestration-federation-start-schema'
 import { failFederatedAttachmentWithReceipt } from './orchestration-federation-start-receipt'
 
-export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
+export function createOrchestrationFederationAttachMethods(
+  runtimeProfile: () => OrcaRuntimeProfile = getProcessRuntimeProfile
+): RpcMethod[] {
+  return [
   defineMethod({
     name: 'orchestration.federationAttachStart',
     params: FederationAttachStartParams,
@@ -73,6 +82,18 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
       }
       if (agent) {
         runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
+      }
+      if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
+        // Why: a receiver cannot validate Git metadata on a remote connection; reject before
+        // accepting the attachment or creating any worktree/terminal side effect.
+        const targetWorktree = createsWorktree
+          ? undefined
+          : await runtime.showManagedWorktree(params.worktree)
+        const repo = await runtime.showRepo(targetWorktree?.repoId ?? (params.repo as string))
+        assertManagedWorkerGitIsolated(
+          targetWorktree?.git?.path ?? repo.path,
+          repo.connectionId ? { hostUnvalidatable: true } : undefined
+        )
       }
       if (createsWorktree) {
         await assertOrchestrationWorktreeCreationSupported({
@@ -295,4 +316,8 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
       }
     }
   })
-]
+  ]
+}
+
+export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] =
+  createOrchestrationFederationAttachMethods()
