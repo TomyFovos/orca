@@ -2704,6 +2704,23 @@ function parseTrackedUpstreamRef(upstreamRef: string): TrackedUpstreamBranch | n
   return parseTrackedUpstreamBranch(normalizedRef)
 }
 
+function recordPRBranchLookupCandidateFailure(
+  candidate: OwnerRepo,
+  attempt: 'head-owner' | 'branch-list' | 'candidate-owner-retry',
+  err: unknown
+): void {
+  const reason = classifyPRRefreshError(err)
+  const host = candidate.host?.trim().toLowerCase() || 'github.com'
+  // Why: raw gh errors may contain sensitive process context. Record the exact
+  // candidate and a stable classification so fallback failures remain auditable
+  // without exposing stderr.
+  console.warn('GitHub PR branch lookup candidate failed:', {
+    candidate: `${host}/${candidate.owner}/${candidate.repo}`,
+    attempt,
+    reason
+  })
+}
+
 async function lookupPRByBranchName(args: {
   candidates: OwnerRepo[]
   headRepo: OwnerRepo | null
@@ -2733,12 +2750,20 @@ async function lookupPRByBranchName(args: {
           return { data, dataRepo: candidate }
         }
       } catch (err) {
-        if (args.headRepo) {
-          throw err
-        }
+        recordPRBranchLookupCandidateFailure(
+          candidate,
+          args.headRepo ? 'head-owner' : 'branch-list',
+          err
+        )
         if (!hasPendingError) {
           pendingError = err
           hasPendingError = true
+        }
+        // Why: a fork lookup has multiple PR-repository candidates. One
+        // unavailable upstream must not prevent the origin candidate from
+        // finding a PR whose head owner is still the fork.
+        if (args.headRepo) {
+          continue
         }
         try {
           const branchData = await getRestPRForBranch(
@@ -2752,6 +2777,7 @@ async function lookupPRByBranchName(args: {
             return { data, dataRepo: candidate }
           }
         } catch (retryErr) {
+          recordPRBranchLookupCandidateFailure(candidate, 'candidate-owner-retry', retryErr)
           if (!hasPendingError) {
             pendingError = retryErr
             hasPendingError = true

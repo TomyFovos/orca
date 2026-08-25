@@ -348,6 +348,121 @@ describe('getPRForBranch', () => {
     })
   })
 
+  it('continues to the fork origin when the upstream PR lookup is unavailable', async () => {
+    resolvePRRepositoryCandidatesMock.mockResolvedValueOnce({
+      candidates: [
+        { owner: 'stablyai', repo: 'orca' },
+        { owner: 'fork', repo: 'orca' }
+      ],
+      headRepo: { owner: 'fork', repo: 'orca' }
+    })
+    ghExecFileAsyncMock
+      .mockRejectedValueOnce(new Error('could not resolve host: api.github.com'))
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify([
+          {
+            number: 54,
+            title: 'Fork origin PR',
+            state: 'open',
+            html_url: 'https://github.com/fork/orca/pull/54',
+            updated_at: '2026-08-25T00:00:00Z',
+            draft: false,
+            mergeable_state: 'clean',
+            base: { ref: 'main', sha: 'base-oid' },
+            head: { ref: 'feature/fork-only', sha: 'head-oid' }
+          }
+        ])
+      })
+      .mockResolvedValueOnce({
+        stdout: JSON.stringify({
+          number: 54,
+          title: 'Hydrated fork origin PR',
+          state: 'OPEN',
+          url: 'https://github.com/fork/orca/pull/54',
+          statusCheckRollup: [],
+          updatedAt: '2026-08-25T00:00:00Z',
+          isDraft: false,
+          mergeable: 'MERGEABLE',
+          baseRefName: 'main',
+          headRefName: 'feature/fork-only',
+          baseRefOid: 'base-oid',
+          headRefOid: 'head-oid'
+        })
+      })
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      const outcome = await getPRForBranchOutcome('/repo-root', 'feature/fork-only')
+
+      expect(outcome).toMatchObject({
+        kind: 'found',
+        pr: {
+          number: 54,
+          title: 'Hydrated fork origin PR',
+          prRepo: { owner: 'fork', repo: 'orca' },
+          headRepo: { owner: 'fork', repo: 'orca' }
+        }
+      })
+      expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
+        2,
+        ['api', 'repos/fork/orca/pulls?head=fork%3Afeature%2Ffork-only&state=all&per_page=1'],
+        { cwd: '/repo-root' }
+      )
+      expect(warn).toHaveBeenCalledWith(
+        'GitHub PR branch lookup candidate failed:',
+        expect.objectContaining({
+          candidate: 'github.com/stablyai/orca',
+          reason: 'network'
+        })
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('surfaces the stored fork lookup error only after every PR repo candidate fails', async () => {
+    resolvePRRepositoryCandidatesMock.mockResolvedValueOnce({
+      candidates: [
+        { owner: 'stablyai', repo: 'orca' },
+        { owner: 'fork', repo: 'orca' }
+      ],
+      headRepo: { owner: 'fork', repo: 'orca' }
+    })
+    ghExecFileAsyncMock
+      .mockRejectedValueOnce(new Error('could not resolve host: api.github.com'))
+      .mockRejectedValueOnce(new Error('HTTP 503: Service Unavailable'))
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    try {
+      const outcome = await getPRForBranchOutcome('/repo-root', 'feature/fork-only')
+
+      expect(outcome).toMatchObject({ kind: 'upstream-error', errorType: 'network' })
+      expect(ghExecFileAsyncMock).toHaveBeenNthCalledWith(
+        2,
+        ['api', 'repos/fork/orca/pulls?head=fork%3Afeature%2Ffork-only&state=all&per_page=1'],
+        { cwd: '/repo-root' }
+      )
+      expect(warn).toHaveBeenNthCalledWith(
+        1,
+        'GitHub PR branch lookup candidate failed:',
+        expect.objectContaining({
+          candidate: 'github.com/stablyai/orca',
+          reason: 'network'
+        })
+      )
+      expect(warn).toHaveBeenNthCalledWith(
+        2,
+        'GitHub PR branch lookup candidate failed:',
+        expect.objectContaining({
+          candidate: 'github.com/fork/orca',
+          reason: 'server_error'
+        })
+      )
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   it('looks up a linked PR number across PR repo candidates', async () => {
     resolvePRRepositoryCandidatesMock.mockResolvedValueOnce({
       candidates: [
