@@ -95,7 +95,8 @@ import {
   cleanupClaimedCloneTarget,
   claimCloneTarget,
   deriveValidatedClonePath,
-  getClonePathComparisonKey
+  getClonePathComparisonKey,
+  releaseClaimedCloneTarget
 } from '../git/repo-clone-path'
 import { getGitCloneFailureMessage } from '../../shared/git-clone-failure-message'
 import { GIT_FETCH_SKIP_AUTO_MAINTENANCE_CONFIG_ARGS } from '../../shared/git-fetch-auto-maintenance'
@@ -17970,8 +17971,12 @@ export class OrcaRuntimeService {
         }
         settled = true
         const cloneSucceeded = !error && code === 0 && !signal
-        if (!cloneSucceeded) {
-          await cleanupClaimedCloneTarget(clonePath, claimedTarget)
+        try {
+          if (!cloneSucceeded) {
+            await cleanupClaimedCloneTarget(clonePath, claimedTarget)
+          }
+        } finally {
+          await releaseClaimedCloneTarget(claimedTarget)
         }
 
         if (error) {

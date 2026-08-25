@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { deriveValidatedClonePath, getClonePathComparisonKey } from './repo-clone-path'
+import {
+  claimCloneTarget,
+  cleanupClaimedCloneTarget,
+  deriveValidatedClonePath,
+  getClonePathComparisonKey,
+  releaseClaimedCloneTarget
+} from './repo-clone-path'
 
 describe('repo clone path helpers', () => {
   it('allows safe repository names that start with two dots', async () => {
@@ -59,5 +65,58 @@ describe('repo clone path helpers', () => {
     expect(getClonePathComparisonKey('\\\\wsl.localhost\\Ubuntu\\home\\User\\repo')).not.toBe(
       getClonePathComparisonKey('\\\\wsl$\\ubuntu\\home\\user\\repo')
     )
+  })
+
+  it('removes only the failed clone directory whose handle it owns', async () => {
+    const destination = await mkdtemp(join(tmpdir(), 'orca-clone-ownership-'))
+    const clonePath = join(destination, 'repo')
+    const claim = await claimCloneTarget(clonePath)
+    try {
+      await writeFile(join(clonePath, 'partial'), 'failed clone')
+      await cleanupClaimedCloneTarget(clonePath, claim)
+      await expect(lstat(clonePath)).rejects.toMatchObject({ code: 'ENOENT' })
+    } finally {
+      await releaseClaimedCloneTarget(claim)
+      await rm(destination, { recursive: true, force: true })
+    }
+  })
+
+  it('preserves a replacement even when saved path identity collides', async () => {
+    const destination = await mkdtemp(join(tmpdir(), 'orca-clone-ownership-'))
+    const clonePath = join(destination, 'repo')
+    const claim = await claimCloneTarget(clonePath)
+    try {
+      await rm(clonePath, { recursive: true, force: true })
+      await mkdir(clonePath)
+      await writeFile(join(clonePath, 'replacement'), 'another process')
+
+      const replacementStats = await lstat(clonePath)
+      claim.ownedDirectoryIdentity = {
+        dev: replacementStats.dev,
+        ino: replacementStats.ino,
+        birthtimeMs: replacementStats.birthtimeMs
+      }
+      await cleanupClaimedCloneTarget(clonePath, claim)
+
+      expect(await readFile(join(clonePath, 'replacement'), 'utf8')).toBe('another process')
+    } finally {
+      await releaseClaimedCloneTarget(claim)
+      await rm(destination, { recursive: true, force: true })
+    }
+  })
+
+  it('releases clone ownership idempotently after success', async () => {
+    const destination = await mkdtemp(join(tmpdir(), 'orca-clone-ownership-'))
+    const clonePath = join(destination, 'repo')
+    const claim = await claimCloneTarget(clonePath)
+    try {
+      await releaseClaimedCloneTarget(claim)
+      await releaseClaimedCloneTarget(claim)
+      await writeFile(join(clonePath, 'completed'), 'clone result')
+      await cleanupClaimedCloneTarget(clonePath, claim)
+      expect(await readFile(join(clonePath, 'completed'), 'utf8')).toBe('clone result')
+    } finally {
+      await rm(destination, { recursive: true, force: true })
+    }
   })
 })

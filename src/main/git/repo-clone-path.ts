@@ -1,6 +1,8 @@
-import { isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
+import { dirname, isAbsolute, join, posix, relative, resolve, sep, win32 } from 'node:path'
+import { constants } from 'node:fs'
 import type { Stats } from 'node:fs'
-import { lstat, mkdir, rm } from 'node:fs/promises'
+import { lstat, mkdir, mkdtemp, open, rename, rm, rmdir } from 'node:fs/promises'
+import type { FileHandle } from 'node:fs/promises'
 import {
   isWindowsAbsolutePathLike,
   normalizeRuntimePathForComparison,
@@ -10,6 +12,7 @@ import {
 export type ClaimedCloneTarget = {
   canCleanup: boolean
   ownedDirectoryIdentity: CloneDirectoryIdentity | null
+  ownershipHandle: FileHandle | null
 }
 
 type CloneDirectoryIdentity = Pick<Stats, 'dev' | 'ino' | 'birthtimeMs'>
@@ -72,14 +75,38 @@ export function getClonePathComparisonKey(clonePath: string): string {
 export async function claimCloneTarget(clonePath: string): Promise<ClaimedCloneTarget> {
   try {
     await mkdir(clonePath, { recursive: false })
-    return {
-      canCleanup: true,
-      ownedDirectoryIdentity: cloneDirectoryIdentity(await lstat(clonePath))
-    }
   } catch (error) {
     if (isErrnoCode(error, 'EEXIST')) {
-      return { canCleanup: false, ownedDirectoryIdentity: null }
+      return { canCleanup: false, ownedDirectoryIdentity: null, ownershipHandle: null }
     }
+    throw error
+  }
+
+  let ownershipHandle: FileHandle | null = null
+  try {
+    // Why: keeping the directory open pins its filesystem object, so a later
+    // remove/recreate cannot impersonate it through inode reuse.
+    ownershipHandle = await open(clonePath, constants.O_RDONLY | (constants.O_DIRECTORY ?? 0))
+    const [ownedStats, currentStats] = await Promise.all([ownershipHandle.stat(), lstat(clonePath)])
+    if (
+      !ownedStats.isDirectory() ||
+      !currentStats.isDirectory() ||
+      !isSameCloneDirectoryIdentity(
+        cloneDirectoryIdentity(ownedStats),
+        cloneDirectoryIdentity(currentStats)
+      )
+    ) {
+      throw new Error('Clone target ownership changed while it was being claimed')
+    }
+    return {
+      canCleanup: true,
+      ownedDirectoryIdentity: cloneDirectoryIdentity(ownedStats),
+      ownershipHandle
+    }
+  } catch (error) {
+    await ownershipHandle?.close().catch(() => undefined)
+    // Do not remove the path here: without an established handle it may
+    // already belong to another process.
     throw error
   }
 }
@@ -88,35 +115,85 @@ export async function cleanupClaimedCloneTarget(
   clonePath: string,
   claimedTarget: ClaimedCloneTarget
 ): Promise<void> {
-  if (!claimedTarget.canCleanup || !claimedTarget.ownedDirectoryIdentity) {
+  if (
+    !claimedTarget.canCleanup ||
+    !claimedTarget.ownedDirectoryIdentity ||
+    !claimedTarget.ownershipHandle
+  ) {
     return
   }
 
+  let quarantineRoot: string | null = null
+  let quarantinedTarget: string | null = null
+  let targetMoved = false
   try {
-    const currentStats = await lstat(clonePath)
-    if (!currentStats.isDirectory()) {
-      return
-    }
+    const [ownedStats, currentStats] = await Promise.all([
+      claimedTarget.ownershipHandle.stat(),
+      lstat(clonePath)
+    ])
     if (
+      !ownedStats.isDirectory() ||
+      !currentStats.isDirectory() ||
       !isSameCloneDirectoryIdentity(
-        claimedTarget.ownedDirectoryIdentity,
+        cloneDirectoryIdentity(ownedStats),
         cloneDirectoryIdentity(currentStats)
       )
     ) {
+      console.warn('[git:clone-cleanup] Refused cleanup because clone target ownership changed', {
+        clonePath
+      })
       return
     }
-  } catch {
-    return
-  }
 
-  await rm(clonePath, { recursive: true, force: true }).catch(() => {
-    // Best-effort cleanup - do not mask the original clone failure.
-  })
+    // Why: isolate the exact directory before recursive deletion; a new path
+    // created at clonePath after this rename is never inside the deletion root.
+    quarantineRoot = await mkdtemp(join(dirname(clonePath), '.orca-clone-cleanup-'))
+    quarantinedTarget = join(quarantineRoot, 'target')
+    await rename(clonePath, quarantinedTarget)
+    targetMoved = true
+
+    const quarantinedStats = await lstat(quarantinedTarget)
+    if (
+      !isSameCloneDirectoryIdentity(
+        cloneDirectoryIdentity(ownedStats),
+        cloneDirectoryIdentity(quarantinedStats)
+      )
+    ) {
+      // A replacement won the narrow check-to-rename race. Preserve it in the
+      // quarantine directory rather than recursively deleting unknown data.
+      console.warn(
+        '[git:clone-cleanup] Refused cleanup because ownership changed during isolation',
+        { clonePath, preservedPath: quarantinedTarget }
+      )
+      return
+    }
+
+    await releaseClaimedCloneTarget(claimedTarget)
+    await rm(quarantineRoot, { recursive: true, force: true })
+    quarantineRoot = null
+    quarantinedTarget = null
+    targetMoved = false
+  } catch (error) {
+    console.warn('[git:clone-cleanup] Refused or failed clone target cleanup', {
+      clonePath,
+      preservedPath: quarantinedTarget,
+      reason: error instanceof Error ? error.message : String(error)
+    })
+  } finally {
+    await releaseClaimedCloneTarget(claimedTarget)
+    if (quarantineRoot && !targetMoved) {
+      await rmdir(quarantineRoot).catch(() => undefined)
+    }
+  }
+}
+
+export async function releaseClaimedCloneTarget(claimedTarget: ClaimedCloneTarget): Promise<void> {
+  const ownershipHandle = claimedTarget.ownershipHandle
+  claimedTarget.ownershipHandle = null
+  await ownershipHandle?.close().catch(() => undefined)
 }
 
 function cloneDirectoryIdentity(stats: Stats): CloneDirectoryIdentity {
-  // Why: fast remove/recreate cycles can reuse an inode; birthtime keeps us
-  // from treating a replacement directory as the clone target we created.
   return { dev: stats.dev, ino: stats.ino, birthtimeMs: stats.birthtimeMs }
 }
 
