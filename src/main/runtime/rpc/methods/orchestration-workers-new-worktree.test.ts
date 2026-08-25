@@ -27,6 +27,9 @@ describe('orchestration new-worktree workers', () => {
   let runId: string
 
   beforeEach(() => {
+    // Runtime profile is process-global; reset it before each case so worker
+    // scheduling cannot leak a managed profile into default-profile coverage.
+    setProcessRuntimeProfile('default')
     db = new OrchestrationDb(':memory:')
     runtime = new OrcaRuntimeService()
     runtime.setOrchestrationDb(db)

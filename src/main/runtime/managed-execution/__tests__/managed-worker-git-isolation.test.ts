@@ -45,7 +45,10 @@ function makeLinkedWorktree(): { commonDir: string; worktree: string } {
 afterEach(() => {
   setProcessRuntimeProfile('default')
   vi.unstubAllEnvs()
-  vi.restoreAllMocks()
+  // Keep Vitest's global expect extensions (including jest-dom) intact for
+  // renderer files that may share this worker. Restore only the spies owned by
+  // this file instead of resetting the global mock registry.
+  vi.mocked(console.error).mockRestore()
   while (createdTempDirs.length > 0) {
     rmSync(createdTempDirs.pop()!, { recursive: true, force: true })
   }
