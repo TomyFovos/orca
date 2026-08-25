@@ -12,6 +12,8 @@
     "../src/main/ipc/worktree-linked-work-item-metadata.ts",
     "../src/main/ipc/worktree-metadata-merge.ts",
     "../src/main/ipc/worktree-path-comparison.ts",
+    "../src/main/runtime/managed-execution/managed-worktree-placement.ts",
+    "../src/main/runtime/runtime-profile.ts",
     "../src/main/wsl-distro-list-output.ts",
     "../src/main/wsl-distro-retry.ts",
     "../src/main/wsl.ts"
