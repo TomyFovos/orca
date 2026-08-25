@@ -100,6 +100,30 @@ beside the remote repo — that is, inside the remote `$HOME`.
 
 The `default` profile is unaffected in every one of these paths.
 
+## Managed worker Git metadata isolation
+
+Before the managed profile starts a worker, Orca asks the local Git binary to
+discover the workspace's shared Git directory with `git -C <workspace>
+rev-parse --git-common-dir`. This covers primary worktrees, linked worktrees,
+and a folder selected below a repository; a missing `.git` marker at the selected
+folder is not proof that the worker cannot discover a parent repository.
+
+When Git reports that the path is not in a repository, the folder workspace is
+allowed. A discovery or interpretation failure is rejected as
+`git_metadata_unresolvable`. A discovered shared Git directory is rejected as
+`git_metadata_reachable` when every ancestor is traversable through POSIX `o+x`
+bits by the isolated worker UID. This protection is Orca-enforced because an
+agent can be started with its own approval and sandbox controls disabled.
+
+Managed worker startup over SSH is intentionally refused with
+`git_metadata_unresolvable` and `local-posix-host-only`: Orca cannot perform the
+host-side discovery or POSIX reachability check on that remote host. Windows is
+also intentionally refused with `git_metadata_unresolvable` and
+`posix-o+x-required`, because the POSIX reachability criterion cannot be
+validated there. These are explicit fail-closed constraints, not a side effect;
+see [Orca #28](https://github.com/TomyFovos/Orca/issues/28) for the SSH product
+limitation.
+
 ## Synchronous Bridge
 
 The renderer reads the profile **synchronously**. An asynchronous read would

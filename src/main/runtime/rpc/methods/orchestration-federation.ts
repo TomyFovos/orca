@@ -2,6 +2,12 @@ import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
+import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
+import {
+  getProcessRuntimeProfile,
+  MANAGED_ORCA_RUNTIME_PROFILE,
+  type OrcaRuntimeProfile
+} from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
 import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
 import {
@@ -19,7 +25,10 @@ import {
 import { FederationAttachStartParams } from './orchestration-federation-start-schema'
 import { failFederatedAttachmentWithReceipt } from './orchestration-federation-start-receipt'
 
-export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
+export function createOrchestrationFederationAttachMethods(
+  runtimeProfile: () => OrcaRuntimeProfile = getProcessRuntimeProfile
+): RpcMethod[] {
+  return [
   defineMethod({
     name: 'orchestration.federationAttachStart',
     params: FederationAttachStartParams,
@@ -73,6 +82,24 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
       }
       if (agent) {
         runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
+      }
+      let resolvedWorktree: Awaited<ReturnType<typeof runtime.showManagedWorktree>> | undefined
+      if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
+        // Why: a receiver cannot validate Git metadata on a remote connection; reject before
+        // accepting the attachment or creating any worktree/terminal side effect.
+        if (!createsWorktree) {
+          resolvedWorktree = await runtime.showManagedWorktree(params.worktree).catch(() => {
+            throw new OrchestrationError(
+              'worktree_not_found_on_server',
+              `Worktree ${params.worktree} was not found on the selected worker server.`
+            )
+          })
+        }
+        const repo = await runtime.showRepo(resolvedWorktree?.repoId ?? (params.repo as string))
+        assertManagedWorkerGitIsolated(
+          resolvedWorktree?.git?.path ?? repo.path,
+          repo.connectionId ? { hostUnvalidatable: true } : undefined
+        )
       }
       if (createsWorktree) {
         await assertOrchestrationWorktreeCreationSupported({
@@ -158,12 +185,14 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
           )
           appendFederationSetupEffect(effects, setup)
         } else {
-          worktree = await runtime.showManagedWorktree(params.worktree).catch(() => {
-            throw new OrchestrationError(
-              'worktree_not_found_on_server',
-              `Worktree ${params.worktree} was not found on the selected worker server.`
-            )
-          })
+          worktree =
+            resolvedWorktree ??
+            (await runtime.showManagedWorktree(params.worktree).catch(() => {
+              throw new OrchestrationError(
+                'worktree_not_found_on_server',
+                `Worktree ${params.worktree} was not found on the selected worker server.`
+              )
+            }))
           effects.push(
             { kind: 'worktree', action: 'reused', id: worktree.id },
             { kind: 'setup', action: 'not_applicable', state: 'not_applicable' }
@@ -295,4 +324,8 @@ export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] = [
       }
     }
   })
-]
+  ]
+}
+
+export const ORCHESTRATION_FEDERATION_ATTACH_METHODS: RpcMethod[] =
+  createOrchestrationFederationAttachMethods()

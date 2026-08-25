@@ -8,6 +8,7 @@ import { COMPUTER_ERROR_CODES } from '../../../shared/runtime-types'
 import { LINEAR_ERROR_CODES } from '../../../shared/linear-agent-access'
 import { AGENT_SESSION_RPC_ERROR_CODES } from '../../../shared/agent-session-host-authority'
 import { MANAGED_WORKTREE_PLACEMENT_ERROR_CODE } from '../managed-execution/managed-worktree-placement'
+import { MANAGED_WORKER_GIT_ISOLATION_ERROR_CODE } from '../managed-execution/managed-worker-git-isolation'
 
 export function successResponse(id: string, meta: RpcEnvelopeMeta, result: unknown): RpcSuccess {
   return {
@@ -94,6 +95,7 @@ const STRUCTURED_RUNTIME_PASSTHROUGH_CODES: ReadonlySet<string> = new Set([
   'orchestration_migration_required',
   'managed_execution_authorization_required',
   MANAGED_WORKTREE_PLACEMENT_ERROR_CODE,
+  MANAGED_WORKER_GIT_ISOLATION_ERROR_CODE,
   'operation_unknown',
   'question_not_found',
   'answer_conflict',

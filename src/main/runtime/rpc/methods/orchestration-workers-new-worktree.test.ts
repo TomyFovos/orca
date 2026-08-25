@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../orca-runtime'
@@ -6,6 +10,17 @@ import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
+import { createOrchestrationWorkerStartMethods } from './orchestration-workers'
+
+// Reachability tests must not inherit a caller TMPDIR below a non-traversable home directory.
+const reachableTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+
+vi.mock('../../managed-execution/authorization', () => ({
+  assertManagedExecutionAuthorized: () => undefined,
+  MANAGED_EXECUTION_AUTHORIZATION_OPERATIONS: {
+    managedWorkerStartup: 'managed worker startup'
+  }
+}))
 
 describe('orchestration new-worktree workers', () => {
   type CreateWorktreeResult = Awaited<ReturnType<OrcaRuntimeService['createManagedWorktree']>>
@@ -71,13 +86,21 @@ describe('orchestration new-worktree workers', () => {
     })
   })
 
-  afterEach(() => db.close())
+  afterEach(() => {
+    db.close()
+  })
 
-  async function startWorker(overrides: Record<string, unknown> = {}) {
-    const task = db.createTask({ spec: 'new-worktree task', runId })
-    const method = ORCHESTRATION_METHODS.find(
+  const managedWorkerStartMethod = createOrchestrationWorkerStartMethods(() => 'managed').find(
+    (candidate) => candidate.name === 'orchestration.workerStart'
+  )!
+
+  async function startWorker(
+    overrides: Record<string, unknown> = {},
+    method = ORCHESTRATION_METHODS.find(
       (candidate) => candidate.name === 'orchestration.workerStart'
     )
+  ) {
+    const task = db.createTask({ spec: 'new-worktree task', runId })
     if (!method) {
       throw new Error('workerStart method is not registered')
     }
@@ -86,6 +109,27 @@ describe('orchestration new-worktree workers', () => {
       from: 'term_coord',
       worktree: 'new-child',
       name: 'new-worker',
+      agent: 'codex',
+      ...overrides
+    })
+    const result = await method.handler(params, { runtime })
+    return { result, task }
+  }
+
+  async function startExistingWorktreeWorker(
+    overrides: Record<string, unknown> = {},
+    method = ORCHESTRATION_METHODS.find(
+      (candidate) => candidate.name === 'orchestration.workerStart'
+    )
+  ) {
+    const task = db.createTask({ spec: 'existing-worktree task', runId })
+    if (!method) {
+      throw new Error('workerStart method is not registered')
+    }
+    const params = method.params!.parse({
+      task: task.id,
+      from: 'term_coord',
+      worktree: 'current',
       agent: 'codex',
       ...overrides
     })
@@ -155,6 +199,242 @@ describe('orchestration new-worktree workers', () => {
       ])
     )
     expect(runtime.createTerminal).not.toHaveBeenCalled()
+  })
+
+  function configureReachableLinkedGitdir() {
+    const base = mkdtempSync(join(reachableTempRoot, 'orca-worker-start-git-'))
+    chmodSync(base, 0o755)
+    const repository = join(base, 'repository')
+    const worktreePath = join(base, 'worktree')
+    mkdirSync(repository, { mode: 0o755 })
+    execFileSync('git', ['init', '-q'], { cwd: repository })
+    execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'fixture'], {
+      cwd: repository,
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 'Orca Test',
+        GIT_AUTHOR_EMAIL: 'orca-test@example.invalid',
+        GIT_COMMITTER_NAME: 'Orca Test',
+        GIT_COMMITTER_EMAIL: 'orca-test@example.invalid'
+      }
+    })
+    execFileSync('git', ['worktree', 'add', '--detach', '-q', worktreePath, 'HEAD'], {
+      cwd: repository
+    })
+    return { base, commonDir: join(repository, '.git'), worktreePath }
+  }
+
+  it('rejects a reachable linked gitdir in an existing worktree before creating the worker terminal', async () => {
+    const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
+    vi.mocked(runtime.createTerminal).mockResolvedValue({ handle: 'term_worker' } as never)
+    vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
+      id: 'repo::worker',
+      repoId: 'repo',
+      git: { path: worktreePath }
+    } as never)
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo',
+      kind: 'git',
+      path: worktreePath
+    } as never)
+
+    try {
+      await expect(startExistingWorktreeWorker({}, managedWorkerStartMethod)).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          layer: 'managed_worker_git_isolation',
+          field: expect.stringContaining(commonDir),
+          rule: 'ancestors-not-world-traversable'
+        }
+      })
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it.each(['reachable-remote', 'ssh-unvalidatable'])(
+    'rejects managed federated start for %s before any remote or local effect',
+    async (serverSelector) => {
+      const task = db.createTask({ spec: 'federated task', runId })
+      const method = managedWorkerStartMethod
+      if (!method) {
+        throw new Error('workerStart method is not registered')
+      }
+      const resolveServer = vi.spyOn(runtime, 'resolveOrchestrationWorkerServer')
+      const callServer = vi.spyOn(runtime, 'callOrchestrationWorkerServer')
+      const createWorktree = vi.spyOn(runtime, 'createManagedWorktree')
+
+      await expect(
+        method.handler(
+          method.params!.parse({
+            task: task.id,
+            from: 'term_coord',
+            on: serverSelector,
+            worktree: 'new-top-level',
+            name: 'remote-worker',
+            agent: 'codex'
+          }),
+          { runtime }
+        )
+      ).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          code: 'git_metadata_unresolvable',
+          layer: 'managed_worker_git_isolation',
+          field: serverSelector,
+          rule: 'local-posix-host-only'
+        }
+      })
+      expect(resolveServer).not.toHaveBeenCalled()
+      expect(callServer).not.toHaveBeenCalled()
+      expect(createWorktree).not.toHaveBeenCalled()
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
+    }
+  )
+
+  it('keeps default-profile federation dispatch available', async () => {
+    const task = db.createTask({ spec: 'default federated task', runId })
+    vi.spyOn(runtime, 'resolveOrchestrationWorkerServer').mockReturnValue({
+      environmentId: 'env_remote',
+      name: 'remote-peer',
+      peerFingerprint: 'peer-fingerprint'
+    } as never)
+    const resolveServer = vi.mocked(runtime.resolveOrchestrationWorkerServer)
+    const callServer = vi.spyOn(runtime, 'callOrchestrationWorkerServer').mockImplementation(
+      async (_environmentId, method, payload) => {
+        if (method === 'status.get') {
+          return {
+            capabilities: [
+              'orchestration.contract.v1',
+              'orchestration.federation.v1'
+            ]
+          } as never
+        }
+        return {
+          dispatchId: (payload as { dispatchId: string }).dispatchId,
+          state: 'failed',
+          failedStage: 'remote_attach',
+          lastError: 'fixture'
+        } as never
+      }
+    )
+    const method = ORCHESTRATION_METHODS.find(
+      (candidate) => candidate.name === 'orchestration.workerStart'
+    )!
+
+    const result = await method.handler(
+      method.params!.parse({
+        task: task.id,
+        from: 'term_coord',
+        on: 'remote-peer',
+        worktree: 'new-top-level',
+        name: 'remote-worker',
+        repo: 'repo',
+        agent: 'codex'
+      }),
+      {
+        runtime,
+        orchestrationMutation: {
+          callerFingerprint: 'caller',
+          requestId: 'request-default-federation',
+          method: 'orchestration.workerStart',
+          payloadHash: 'payload'
+        }
+      }
+    )
+
+    expect(result).toMatchObject({ state: 'failed' })
+    expect(resolveServer).toHaveBeenCalledWith('remote-peer')
+    expect(callServer).toHaveBeenCalledWith(
+      'env_remote',
+      'orchestration.federationAttachStart',
+      expect.any(Object),
+      expect.any(Number),
+      expect.any(Object)
+    )
+  })
+
+  it('keeps managed federated rejection on the host-validation rule on Windows', async () => {
+    const platform = vi.spyOn(process, 'platform', 'get').mockReturnValue('win32')
+    const task = db.createTask({ spec: 'Windows federated task', runId })
+    const method = managedWorkerStartMethod
+    if (!method) {
+      platform.mockRestore()
+      throw new Error('workerStart method is not registered')
+    }
+    try {
+      await expect(
+        method.handler(
+          method.params!.parse({
+            task: task.id,
+            from: 'term_coord',
+            on: 'windows-peer',
+            worktree: 'new-top-level',
+            name: 'windows-worker',
+            agent: 'codex'
+          }),
+          { runtime }
+        )
+      ).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: { rule: 'local-posix-host-only' }
+      })
+      expect(db.getDispatchContext(task.id)).toBeUndefined()
+    } finally {
+      platform.mockRestore()
+    }
+  })
+
+  it('rejects a reachable linked gitdir in a new worktree before creating the worker terminal', async () => {
+    const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
+    mockCreatedWorktree()
+    const createWorktree = vi.spyOn(runtime, 'createManagedWorktree')
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo',
+      kind: 'git',
+      path: worktreePath
+    } as never)
+
+    try {
+      await expect(startWorker({}, managedWorkerStartMethod)).rejects.toMatchObject({
+        code: 'managed_worker_git_isolation_required',
+        data: {
+          layer: 'managed_worker_git_isolation',
+          field: expect.stringContaining(commonDir),
+          rule: 'ancestors-not-world-traversable'
+        }
+      })
+      expect(createWorktree).not.toHaveBeenCalled()
+      expect(runtime.createTerminal).not.toHaveBeenCalled()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  })
+
+  it('allows a reachable Git worktree in the default profile', async () => {
+    const { base, worktreePath } = configureReachableLinkedGitdir()
+    vi.mocked(runtime.createTerminal).mockResolvedValue({ handle: 'term_worker' } as never)
+    vi.mocked(runtime.showManagedWorktree).mockResolvedValue({
+      id: 'repo::worker',
+      repoId: 'repo',
+      git: { path: worktreePath }
+    } as never)
+    vi.mocked(runtime.showRepo).mockResolvedValue({
+      id: 'repo',
+      kind: 'git',
+      path: worktreePath
+    } as never)
+
+    try {
+      await expect(startExistingWorktreeWorker()).resolves.toMatchObject({
+        result: { state: 'ready' }
+      })
+      expect(runtime.createTerminal).toHaveBeenCalled()
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
   })
 
   it('rejects a new worktree for a folder project before creating effects', async () => {
