@@ -50,7 +50,8 @@ import {
   claimCloneTarget,
   deriveCloneRepoNameFromUrl,
   deriveValidatedClonePath,
-  getClonePathComparisonKey
+  getClonePathComparisonKey,
+  releaseClaimedCloneTarget
 } from '../git/repo-clone-path'
 import type { ClaimedCloneTarget } from '../git/repo-clone-path'
 import { scanNestedRepos } from '../project-groups/nested-repo-discovery'
@@ -2406,9 +2407,13 @@ export function registerRepoHandlers(mainWindow: BrowserWindow, store: Store): v
             }
 
             const cloneSucceeded = !err && code === 0 && !signal
-            if (!cloneSucceeded) {
-              // Why: only the process that created this target may remove it, and only after git reports failure.
-              await cleanupOwnedCloneTarget(metadata)
+            try {
+              if (!cloneSucceeded) {
+                // Why: only the process that created this target may remove it, and only after git reports failure.
+                await cleanupOwnedCloneTarget(metadata)
+              }
+            } finally {
+              await releaseClaimedCloneTarget(claimedTarget)
             }
             if (metadata.abortRequested && !cloneSucceeded) {
               settleCloneAbortCleanup(metadata)
