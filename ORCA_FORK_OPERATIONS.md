@@ -20,5 +20,17 @@ AI-DE × Orca 統合プログラムで共通に適用する fork、worktree、�
 ## 確定済みの裁定
 
 - マージ基準は部分集合判定。PR の失敗集合が `origin/main` の失敗集合の部分集合であること。数だけの報告は受け付けない
-- GitHub Actions の実行枠は今月分が尽きている。CI は走らない。マージ前のローカル全項目検証を必須とし、実行コマンドと出力を PR 本文へ記録する
+- GitHub-hosted Actions の実行枠枯渇を理由に CI を実施しない旧方針は終了した。fork の標準回帰 CI は、下記の安全条件を満たす認可済み self-hosted runner で実行する。マージ前のローカル全項目検証も引き続き必須で、実行コマンドと出力を PR 本文へ記録する
 - PR の base を必ず確認する。既にマージ済みの branch を base にすると成果が `main` へ着地しない（orca PR #8/#9 で実際に発生した）
+
+## Fork self-hosted 回帰 CI
+
+`.github/workflows/self-hosted-regression.yml` は、fork の `main` への push、fork 内の `main` 向け PR、または `workflow_dispatch` で回帰テストを実行する標準 CI workflow である。既存の大規模 upstream workflow は upstream 製品の責務を保つため変更せず、特権処理や Linux 以外の OS 固有検証を永続 self-hosted runner へ混在させない。
+
+- runner は確認済みラベル `self-hosted`, `Linux`, `X64` を持つ `github-runner-orca` 認可済み環境に限定する。concurrency group は repository・workflow・ref ごとに分離し、同じ ref の古い実行はキャンセルする。job timeout は 90 分とする
+- job-level の条件 `github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository` を必須とし、外部 fork の PR では永続 runner を絶対に使用しない
+- checkout は `clean: true`、完全履歴、`persist-credentials: false` で行う。追加した外部 Actions は完全な commit SHA (`actions/checkout` と `actions/upload-artifact`) で固定する
+- Node と pnpm は `package.json` の `engines` / `packageManager` を基準に、既存の `.github/actions/install-node-dependencies` local action (`native-runtime: node`) で準備する。local action の既存設定は変更しない
+- `pnpm test` の標準出力と標準エラーは `set -euo pipefail` と `tee` で `$RUNNER_TEMP/orca-regression-tests.log` に保存し、テスト失敗をパイプで隠さない。ログは `always()` の artifact upload で 14 日保持する
+- Issue #65 に R71 の保持開始を記録していない状態では full suite を手動 dispatch しない
+- 受入れ判定は引き続き R34（head の失敗集合が base の部分集合）、R52（full suite ×3、head/base 交互、無負荷）、R61（専有 worktree）、R71（full suite 保持を一つに限定）に従う。`config/tsconfig.tc.web.json` の既知の TS6307 ×2 は base/head の失敗集合比較で扱い、新規失敗を許容しない
