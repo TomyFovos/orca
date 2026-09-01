@@ -28,6 +28,7 @@ AI-DE × Orca 統合プログラムで共通に適用する fork、worktree、�
 `.github/workflows/self-hosted-regression.yml` は、fork の `main` への push、fork 内の `main` 向け PR、または `workflow_dispatch` で回帰テストを実行する標準 CI workflow である。既存の大規模 upstream workflow は upstream 製品の責務を保つため変更せず、特権処理や Linux 以外の OS 固有検証を永続 self-hosted runner へ混在させない。
 
 - runner は確認済みラベル `self-hosted`, `Linux`, `X64` を持つ `github-runner-orca` 認可済み環境に限定する。concurrency group は repository・workflow・ref ごとに分離し、同じ ref の古い実行はキャンセルする。job timeout は 90 分とする
+- runner には Node native addon を構築する `make`, `g++`, `python3` が必要である。Debian 系では `build-essential` と Python 3 を事前導入する。workflow は依存関係のinstall前にこのtoolchainを検査し、不足commandを列挙してfail-closedする
 - job-level の条件 `github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository` を必須とし、外部 fork の PR では永続 runner を絶対に使用しない
 - checkout は `clean: true`、完全履歴、`persist-credentials: false` で行う。追加した外部 Actions は完全な commit SHA (`actions/checkout` と `actions/upload-artifact`) で固定する
 - Node と pnpm は `package.json` の `engines` / `packageManager` を基準に、既存の `.github/actions/install-node-dependencies` local action (`native-runtime: node`) で準備する。local action の既存設定は変更しない
