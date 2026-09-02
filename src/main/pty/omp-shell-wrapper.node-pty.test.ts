@@ -125,6 +125,9 @@ describePosix('OMP shell wrapper node-pty reproduction', () => {
       ORCA_FAKE_OMP_DEFAULT_DIR: ompDir,
       ORCA_CAPTURE_FILE: captureFile,
       ORCA_AFTER_PI_FILE: afterPiFile,
+      LANG: 'C',
+      LANGUAGE: 'C',
+      LC_ALL: 'C',
       TERM: process.env.TERM || 'xterm-256color'
     })
 

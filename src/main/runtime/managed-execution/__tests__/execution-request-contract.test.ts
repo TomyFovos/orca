@@ -1,15 +1,13 @@
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { readCopiedAiDeExecutionRequestSchema } from './ai-de-execution-request-contract'
 import {
   EXECUTION_REQUEST_CONTRACT_VERSIONS,
   EXECUTION_REQUEST_OPERATION_PAYLOAD_CONTRACT,
   EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS,
   type ExecutionOperation
 } from '../execution-request-contract'
-
-const AI_DE_EXECUTION_REQUEST_SCHEMA =
-  '/home/atsou/src/github.com/TomyFovos/AI-DE/knowledge/schemas/execution-request-1.schema.json'
 
 type JsonRecord = Record<string, unknown>
 
@@ -42,7 +40,7 @@ describe('managed execution request contract versions', () => {
   })
 
   it('operation payload contract matches the AI-DE execution request schema', () => {
-    const schema = JSON.parse(fs.readFileSync(AI_DE_EXECUTION_REQUEST_SCHEMA, 'utf8')) as JsonRecord
+    const schema = readCopiedAiDeExecutionRequestSchema() as JsonRecord
     const variants = Array.isArray(schema.oneOf) ? schema.oneOf : []
     expect(variants.length).toBeGreaterThan(0)
 
@@ -69,7 +67,7 @@ describe('managed execution request contract versions', () => {
   })
 
   it('request root required fields match the AI-DE execution request schema', () => {
-    const schema = JSON.parse(fs.readFileSync(AI_DE_EXECUTION_REQUEST_SCHEMA, 'utf8')) as JsonRecord
+    const schema = readCopiedAiDeExecutionRequestSchema() as JsonRecord
     expect(sameStringArray(schema.required, EXECUTION_REQUEST_REQUIRED_PAYLOAD_FIELDS)).toBe(true)
   })
 })
