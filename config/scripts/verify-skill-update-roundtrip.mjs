@@ -73,8 +73,29 @@ function historicalRelease(name) {
   throw new Error(`No historical released snapshot is available for ${name}`)
 }
 
+class MissingHistoricalTagError extends Error {
+  constructor(name, tag) {
+    super(`required historical tag refs/tags/${tag} is missing for ${name}`)
+    this.name = 'MissingHistoricalTagError'
+  }
+}
+
+function assertHistoricalTag(name, tag) {
+  try {
+    execFileSync('git', ['show-ref', '--verify', '--quiet', `refs/tags/${tag}`], {
+      stdio: 'ignore'
+    })
+  } catch (error) {
+    if (error?.status === 1) {
+      throw new MissingHistoricalTagError(name, tag)
+    }
+    throw error
+  }
+}
+
 async function materializePackage(name, tag, destination) {
   const prefix = `skills/${name}/`
+  assertHistoricalTag(name, tag)
   const entries = execFileSync('git', ['ls-tree', '-r', '-z', tag, '--', `skills/${name}`])
     .toString('utf8')
     .split('\0')
@@ -243,6 +264,13 @@ try {
   const controlProviderStat = await lstat(controlProvider)
   if (shape === 'symlink' && !controlProviderStat.isSymbolicLink()) {
     throw new Error('Targeted update changed the non-targeted control topology')
+  }
+} catch (error) {
+  if (error instanceof MissingHistoricalTagError) {
+    console.error(`[skill-update-roundtrip] refused: ${error.message}`)
+    process.exitCode = 1
+  } else {
+    throw error
   }
 } finally {
   await rm(sandbox, { recursive: true, force: true })
