@@ -16,20 +16,20 @@ runs:
   steps:
     # setup-node needs pnpm on PATH to locate and restore its store.
     - name: Setup pnpm
-      uses: pnpm/action-setup@v6
+      uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6
       with:
         run_install: false
 
     - name: Setup Node.js
       if: inputs.node-version == ''
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
       with:
         node-version-file: package.json
         cache: pnpm
 
     - name: Setup requested Node.js
       if: inputs.node-version != ''
-      uses: actions/setup-node@v6
+      uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
       with:
         node-version: ${{ inputs.node-version }}
         cache: pnpm

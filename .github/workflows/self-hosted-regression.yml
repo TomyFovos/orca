@@ -1,0 +1,78 @@
+name: Self-hosted regression
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Regression (self-hosted)
+    # Never run untrusted code from an external fork on a persistent runner.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on:
+      - self-hosted
+      - Linux
+      - X64
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          clean: true
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Verify native build toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=()
+          for command_name in make g++ python3; do
+            if ! command -v "${command_name}" >/dev/null 2>&1; then
+              missing+=("${command_name}")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf 'Missing native build commands:'
+            printf ' %s' "${missing[@]}"
+            printf '\nInstall the Debian build-essential package and Python 3 on the self-hosted runner.\n'
+            exit 1
+          fi
+
+          make --version | sed -n '1p'
+          g++ --version | sed -n '1p'
+          python3 --version
+
+      - name: Install Node dependencies
+        uses: ./.github/actions/install-node-dependencies
+        with:
+          native-runtime: node
+
+      - name: Run regression test suite
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm test 2>&1 | tee "$RUNNER_TEMP/orca-regression-tests.log"
+
+      - name: Upload regression test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: self-hosted-regression-${{ github.run_id }}
+          path: ${{ runner.temp }}/orca-regression-tests.log
+          if-no-files-found: warn
+          retention-days: 14

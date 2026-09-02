@@ -23,6 +23,12 @@ function formatTimeForTest(hour: number, minute: number): string {
   }).format(date)
 }
 
+function formatWeekdayForTest(dayOfWeek: number): string {
+  return new Intl.DateTimeFormat(undefined, { weekday: 'long' }).format(
+    new Date(2026, 0, 4 + dayOfWeek)
+  )
+}
+
 afterEach(() => {
   vi.restoreAllMocks()
 })
@@ -143,7 +149,9 @@ describe('automation schedules', () => {
     expect(formatAutomationSchedule('15 10 * * MON-FRI')).toBe(
       `Weekdays at ${formatTimeForTest(10, 15)}`
     )
-    expect(formatAutomationSchedule('30 12 * * 7')).toBe(`Sundays at ${formatTimeForTest(12, 30)}`)
+    expect(formatAutomationSchedule('30 12 * * 7')).toBe(
+      `${formatWeekdayForTest(0)}s at ${formatTimeForTest(12, 30)}`
+    )
   })
 
   it('tokenizes pasted cron whitespace without regex field splitting', () => {
