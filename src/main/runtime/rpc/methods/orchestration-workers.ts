@@ -14,7 +14,10 @@ import {
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
 import { WorkerStartParams } from './orchestration-worker-start-schema'
-import { resolveWorkerStartTarget } from './orchestration-worker-start-validation'
+import {
+  resolveWorkerStartTarget,
+  validateWorkerStartRequest
+} from './orchestration-worker-start-validation'
 import {
   createExistingWorktreeWorkerTerminal,
   createWorkerWorktree,
@@ -73,12 +76,14 @@ export function createOrchestrationWorkerStartMethods(
         })
       }
 
+      const validation = validateWorkerStartRequest({ params, runtime })
       const coordinatorTerminal = await runtime.showTerminal(params.from)
       const coordinatorWorktree = await runtime.showManagedWorktree(
         `id:${coordinatorTerminal.worktreeId}`
       )
       const target = await resolveWorkerStartTarget({
         params,
+        validation,
         runtime,
         coordinatorWorktree,
         runtimeProfile

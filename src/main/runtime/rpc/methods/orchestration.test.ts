@@ -4,6 +4,7 @@ import { ORCHESTRATION_METHODS } from './orchestration'
 import { RpcDispatcher } from '../dispatcher'
 import { buildRegistry, type RpcContext, type RpcRequest } from '../core'
 import { OrchestrationDb } from '../../orchestration/db'
+import { OrchestrationError } from '../../orchestration/orchestration-error'
 import { reconcileLifecycleMessage } from '../../orchestration/lifecycle-reconciliation'
 import { OrcaRuntimeService } from '../../orca-runtime'
 import type { RuntimeTerminalSummary } from '../../../../shared/runtime-types'
@@ -2237,6 +2238,44 @@ describe('orchestration RPC methods', () => {
       expect(runtime.createTerminal).not.toHaveBeenCalled()
       expect(db.getTask(task.id)?.status).toBe('ready')
       expect(db.getDispatchContext(task.id)).toBeUndefined()
+    })
+
+    it('returns invalid_argument before a failing coordinator lookup', async () => {
+      setup()
+      const task = db.createTask({ spec: 'invalid worker request' })
+      const showTerminal = vi
+        .spyOn(runtime, 'showTerminal')
+        .mockRejectedValue(new Error('coordinator unavailable'))
+
+      await expect(
+        call('orchestration.workerStart', {
+          task: task.id,
+          from: 'term_coord',
+          terminal: 'term_worker',
+          agent: 'codex'
+        })
+      ).rejects.toMatchObject({ code: 'invalid_argument' })
+      expect(showTerminal).not.toHaveBeenCalled()
+    })
+
+    it('returns agent_unconfigured before a failing coordinator lookup', async () => {
+      setup()
+      const task = db.createTask({ spec: 'unconfigured worker request' })
+      vi.spyOn(runtime, 'validateOrchestrationAgentLauncher').mockImplementation(() => {
+        throw new OrchestrationError('agent_unconfigured', 'launcher unavailable')
+      })
+      const showTerminal = vi
+        .spyOn(runtime, 'showTerminal')
+        .mockRejectedValue(new Error('coordinator unavailable'))
+
+      await expect(
+        call('orchestration.workerStart', {
+          task: task.id,
+          from: 'term_coord',
+          agent: 'codex'
+        })
+      ).rejects.toMatchObject({ code: 'agent_unconfigured' })
+      expect(showTerminal).not.toHaveBeenCalled()
     })
 
     it('commits the launched worker token with its durable authority', async () => {

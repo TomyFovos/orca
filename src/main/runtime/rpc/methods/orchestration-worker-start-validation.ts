@@ -19,17 +19,18 @@ export type WorkerStartTarget = {
   resolvedWorktree: Awaited<ReturnType<Runtime['showManagedWorktree']>> | undefined
 }
 
-export async function resolveWorkerStartTarget({
+export type WorkerStartRequestValidation = Pick<
+  WorkerStartTarget,
+  'requestedWorktree' | 'createsWorktree' | 'agent'
+>
+
+export function validateWorkerStartRequest({
   params,
-  runtime,
-  coordinatorWorktree,
-  runtimeProfile
+  runtime
 }: {
   params: WorkerStartInput
   runtime: Runtime
-  coordinatorWorktree: Awaited<ReturnType<Runtime['showManagedWorktree']>>
-  runtimeProfile: () => OrcaRuntimeProfile
-}): Promise<WorkerStartTarget> {
+}): WorkerStartRequestValidation {
   const requestedWorktree = params.worktree ?? 'current'
   const createsWorktree =
     requestedWorktree === 'new-child' || requestedWorktree === 'new-top-level'
@@ -64,6 +65,23 @@ export async function resolveWorkerStartTarget({
   if (agent) {
     runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
   }
+  return { requestedWorktree, createsWorktree, agent }
+}
+
+export async function resolveWorkerStartTarget({
+  params,
+  validation,
+  runtime,
+  coordinatorWorktree,
+  runtimeProfile
+}: {
+  params: WorkerStartInput
+  validation: WorkerStartRequestValidation
+  runtime: Runtime
+  coordinatorWorktree: Awaited<ReturnType<Runtime['showManagedWorktree']>>
+  runtimeProfile: () => OrcaRuntimeProfile
+}): Promise<WorkerStartTarget> {
+  const { requestedWorktree, createsWorktree, agent } = validation
 
   if (createsWorktree) {
     await assertOrchestrationWorktreeCreationSupported({
