@@ -1,8 +1,4 @@
-import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { ORCHESTRATION_CONTRACT_VERSION } from '../../../../shared/protocol-version'
 import { OrcaRuntimeService } from '../../orca-runtime'
@@ -10,10 +6,7 @@ import { OrchestrationDb } from '../../orchestration/db'
 import { RpcDispatcher } from '../dispatcher'
 import type { RpcRequest } from '../core'
 import { ORCHESTRATION_METHODS } from './orchestration'
-import { createOrchestrationWorkerStartMethods } from './orchestration-workers'
-
-// Reachability tests must not inherit a caller TMPDIR below a non-traversable home directory.
-const reachableTempRoot = process.platform === 'win32' ? tmpdir() : '/tmp'
+import { createNewWorktreeTestHelpers } from './orchestration-workers-new-worktree-helpers'
 
 vi.mock('../../managed-execution/authorization', () => ({
   assertManagedExecutionAuthorized: () => undefined,
@@ -23,7 +16,6 @@ vi.mock('../../managed-execution/authorization', () => ({
 }))
 
 describe('orchestration new-worktree workers', () => {
-  type CreateWorktreeResult = Awaited<ReturnType<OrcaRuntimeService['createManagedWorktree']>>
   const coordinatorPaneKey = 'tab_coord:aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
   let db: OrchestrationDb
   let runtime: OrcaRuntimeService
@@ -90,83 +82,24 @@ describe('orchestration new-worktree workers', () => {
     db.close()
   })
 
-  const managedWorkerStartMethod = createOrchestrationWorkerStartMethods(() => 'managed').find(
-    (candidate) => candidate.name === 'orchestration.workerStart'
-  )!
-
-  async function startWorker(
-    overrides: Record<string, unknown> = {},
-    method = ORCHESTRATION_METHODS.find(
-      (candidate) => candidate.name === 'orchestration.workerStart'
-    )
-  ) {
-    const task = db.createTask({ spec: 'new-worktree task', runId })
-    if (!method) {
-      throw new Error('workerStart method is not registered')
+  const {
+    configureReachableLinkedGitdir,
+    managedWorkerStartMethod,
+    mockCreatedWorktree,
+    removeTemporaryGitFixture,
+    startExistingWorktreeWorker,
+    startWorker
+  } = createNewWorktreeTestHelpers({
+    get db() {
+      return db
+    },
+    get runtime() {
+      return runtime
+    },
+    get runId() {
+      return runId
     }
-    const params = method.params!.parse({
-      task: task.id,
-      from: 'term_coord',
-      worktree: 'new-child',
-      name: 'new-worker',
-      agent: 'codex',
-      ...overrides
-    })
-    const result = await method.handler(params, { runtime })
-    return { result, task }
-  }
-
-  async function startExistingWorktreeWorker(
-    overrides: Record<string, unknown> = {},
-    method = ORCHESTRATION_METHODS.find(
-      (candidate) => candidate.name === 'orchestration.workerStart'
-    )
-  ) {
-    const task = db.createTask({ spec: 'existing-worktree task', runId })
-    if (!method) {
-      throw new Error('workerStart method is not registered')
-    }
-    const params = method.params!.parse({
-      task: task.id,
-      from: 'term_coord',
-      worktree: 'current',
-      agent: 'codex',
-      ...overrides
-    })
-    const result = await method.handler(params, { runtime })
-    return { result, task }
-  }
-
-  function mockCreatedWorktree(options?: {
-    hookFound?: boolean
-    startupPolicy?: 'start-immediately' | 'wait-for-setup'
-    state?: 'running' | 'skipped' | 'not_configured' | 'spawn_failed'
-    terminals?: { handle: string; title: string }[]
-    setupTerminalHandle?: string
-  }) {
-    const hookFound = options?.hookFound ?? true
-    const state = options?.state ?? (hookFound ? 'running' : 'not_configured')
-    vi.spyOn(runtime, 'createManagedWorktree').mockResolvedValue({
-      worktree: { id: 'repo::created', repoId: 'repo' },
-      startupTerminal: { spawned: true, handle: 'term_worker' },
-      setupReceipt: {
-        requested: state === 'skipped' ? 'skip' : 'run',
-        hookFound,
-        startupPolicy: options?.startupPolicy ?? 'start-immediately',
-        state,
-        terminalHandle:
-          options?.setupTerminalHandle ??
-          options?.terminals?.find((terminal) => terminal.title === 'Setup')?.handle
-      }
-    } as never)
-    if (options?.terminals) {
-      vi.mocked(runtime.listTerminals).mockResolvedValue({
-        terminals: options.terminals,
-        totalCount: options.terminals.length,
-        truncated: false
-      } as never)
-    }
-  }
+  })
 
   it('creates an independent top-level worktree and reuses its agent terminal', async () => {
     mockCreatedWorktree()
@@ -201,29 +134,6 @@ describe('orchestration new-worktree workers', () => {
     expect(runtime.createTerminal).not.toHaveBeenCalled()
   })
 
-  function configureReachableLinkedGitdir() {
-    const base = mkdtempSync(join(reachableTempRoot, 'orca-worker-start-git-'))
-    chmodSync(base, 0o755)
-    const repository = join(base, 'repository')
-    const worktreePath = join(base, 'worktree')
-    mkdirSync(repository, { mode: 0o755 })
-    execFileSync('git', ['init', '-q'], { cwd: repository })
-    execFileSync('git', ['commit', '--allow-empty', '-q', '-m', 'fixture'], {
-      cwd: repository,
-      env: {
-        ...process.env,
-        GIT_AUTHOR_NAME: 'Orca Test',
-        GIT_AUTHOR_EMAIL: 'orca-test@example.invalid',
-        GIT_COMMITTER_NAME: 'Orca Test',
-        GIT_COMMITTER_EMAIL: 'orca-test@example.invalid'
-      }
-    })
-    execFileSync('git', ['worktree', 'add', '--detach', '-q', worktreePath, 'HEAD'], {
-      cwd: repository
-    })
-    return { base, commonDir: join(repository, '.git'), worktreePath }
-  }
-
   it('rejects a reachable linked gitdir in an existing worktree before creating the worker terminal', async () => {
     const { base, commonDir, worktreePath } = configureReachableLinkedGitdir()
     vi.mocked(runtime.createTerminal).mockResolvedValue({ handle: 'term_worker' } as never)
@@ -249,7 +159,7 @@ describe('orchestration new-worktree workers', () => {
       })
       expect(runtime.createTerminal).not.toHaveBeenCalled()
     } finally {
-      rmSync(base, { recursive: true, force: true })
+      removeTemporaryGitFixture(base)
     }
   })
 
@@ -409,7 +319,7 @@ describe('orchestration new-worktree workers', () => {
       expect(createWorktree).not.toHaveBeenCalled()
       expect(runtime.createTerminal).not.toHaveBeenCalled()
     } finally {
-      rmSync(base, { recursive: true, force: true })
+      removeTemporaryGitFixture(base)
     }
   })
 
@@ -433,7 +343,7 @@ describe('orchestration new-worktree workers', () => {
       })
       expect(runtime.createTerminal).toHaveBeenCalled()
     } finally {
-      rmSync(base, { recursive: true, force: true })
+      removeTemporaryGitFixture(base)
     }
   })
 
@@ -773,6 +683,7 @@ describe('orchestration new-worktree workers', () => {
 
   it('persists the retry request with the starting Dispatch before worktree effects', async () => {
     const task = db.createTask({ spec: 'atomic worker acceptance', runId })
+    type CreateWorktreeResult = Awaited<ReturnType<OrcaRuntimeService['createManagedWorktree']>>
     let finishCreate: ((value: CreateWorktreeResult) => void) | undefined
     vi.spyOn(runtime, 'createManagedWorktree').mockImplementation(
       async () =>

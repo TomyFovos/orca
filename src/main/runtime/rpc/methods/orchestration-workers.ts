@@ -1,4 +1,3 @@
-import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
 import {
   assertManagedExecutionAuthorized,
@@ -14,8 +13,8 @@ import {
 } from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
 import { startFederatedWorker } from './orchestration-federated-worker-start'
-import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
 import { WorkerStartParams } from './orchestration-worker-start-schema'
+import { resolveWorkerStartTarget } from './orchestration-worker-start-validation'
 import {
   createExistingWorktreeWorkerTerminal,
   createWorkerWorktree,
@@ -74,70 +73,18 @@ export function createOrchestrationWorkerStartMethods(
         })
       }
 
-      const requestedWorktree = params.worktree ?? 'current'
-      const createsWorktree =
-        requestedWorktree === 'new-child' || requestedWorktree === 'new-top-level'
-      if (params.terminal && params.agent) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          '--terminal reuses an existing agent and cannot combine with --agent.'
-        )
-      }
-      if (createsWorktree && params.terminal) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          '--terminal cannot combine with new-worktree creation.'
-        )
-      }
-      if (createsWorktree && !params.name) {
-        throw new OrchestrationError('invalid_argument', 'New worktrees require --name.')
-      }
-      if (!createsWorktree && (params.name || params.repo || params.baseBranch || params.setup)) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          'Creation and setup options apply only to new-child or new-top-level worktrees.'
-        )
-      }
-      const agent = params.agent
-      if (!params.terminal && (!agent || !isTuiAgent(agent))) {
-        throw new OrchestrationError(
-          'agent_unconfigured',
-          'A configured --agent is required when worker-start creates a terminal.'
-        )
-      }
-      if (agent) {
-        runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
-      }
-
       const coordinatorTerminal = await runtime.showTerminal(params.from)
       const coordinatorWorktree = await runtime.showManagedWorktree(
         `id:${coordinatorTerminal.worktreeId}`
       )
-      if (createsWorktree) {
-        await assertOrchestrationWorktreeCreationSupported({
-          runtime,
-          repoSelector: params.repo ?? coordinatorWorktree.repoId,
-          existingPlacement: 'current or an exact existing folder workspace'
-        })
-      }
-      let resolvedWorktree = createsWorktree
-        ? undefined
-        : requestedWorktree === 'current'
-          ? coordinatorWorktree
-          : await runtime.showManagedWorktree(requestedWorktree)
-      if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
-        if (createsWorktree) {
-          const workerRepo = await runtime.showRepo(params.repo ?? coordinatorWorktree.repoId)
-          assertManagedWorkerGitIsolated(workerRepo.path, {
-            hostUnvalidatable: Boolean(workerRepo.connectionId)
-          })
-        } else if (resolvedWorktree) {
-          const resolvedRepo = await runtime.showRepo(resolvedWorktree.repoId)
-          assertManagedWorkerGitIsolated(resolvedWorktree.git.path, {
-            hostUnvalidatable: Boolean(resolvedRepo.connectionId)
-          })
-        }
-      }
+      const target = await resolveWorkerStartTarget({
+        params,
+        runtime,
+        coordinatorWorktree,
+        runtimeProfile
+      })
+      const { requestedWorktree, createsWorktree, agent } = target
+      let resolvedWorktree = target.resolvedWorktree
       let explicitTerminal
       if (params.terminal) {
         explicitTerminal = await runtime.showTerminal(params.terminal)

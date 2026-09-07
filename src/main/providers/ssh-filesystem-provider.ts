@@ -7,6 +7,7 @@ import {
   downloadFolderViaSftp,
   type SftpFactory
 } from './ssh-filesystem-download'
+import { writeSshTerminalArtifact } from './ssh-filesystem-terminal-artifact'
 import { openSshFileUploadSession, type SshRawTransferOptions } from './ssh-filesystem-file-upload'
 import {
   closeSshFilesystemWatch,
@@ -191,28 +192,7 @@ export class SshFilesystemProvider implements IFilesystemProvider {
     content: string,
     options: TerminalArtifactAccessOptions
   ): Promise<TerminalArtifactFileStat> {
-    let result: { stat?: TerminalArtifactFileStat }
-    try {
-      result = (await this.mux.request('fs.writeTerminalArtifact', {
-        filePath,
-        content,
-        expectedRealPath: options.expectedRealPath,
-        expectedStatIdentity: options.expectedStatIdentity,
-        expectedContentDigest: options.expectedContentDigest,
-        maxBytes: options.maxBytes
-      })) as { stat?: TerminalArtifactFileStat }
-    } catch (err) {
-      if (isMethodNotFoundError(err)) {
-        throw new Error(
-          'Remote terminal artifact access is unavailable. Reconnect the SSH target before retrying.'
-        )
-      }
-      throw err
-    }
-    if (!result.stat) {
-      throw new Error('terminal_file_grant_stale')
-    }
-    return result.stat
+    return writeSshTerminalArtifact(this.mux, filePath, content, options)
   }
 
   async writeFileBase64(filePath: string, contentBase64: string): Promise<void> {

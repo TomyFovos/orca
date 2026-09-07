@@ -24,6 +24,11 @@ import {
   filterOrchestrationSkillDelivery,
   resolveOrcaRuntimeProfile
 } from '../../shared/runtime-profile'
+import {
+  formatNpxCommand,
+  formatSkillSelectionHelp,
+  type SkillMutationVerb
+} from './skills-formatting'
 
 type BundledSkillGuide = {
   name: string
@@ -168,8 +173,6 @@ function runNpxSkills(args: string[]): Promise<number> {
   })
 }
 
-type SkillMutationVerb = 'install' | 'update'
-
 /** Agents Orca can see on this host, as `skills --agent` keys. */
 function detectSkillsCliAgentKeys(): string[] {
   const runtime = process.platform
@@ -244,21 +247,6 @@ function buildNpxSkillsArgs(
   // Why: a cold package cache makes bare `npx` prompt before it will fetch
   // `skills`, which strands an unattended host just like the picker does.
   return ['--yes', ...skillArgs]
-}
-
-/** Render the exact argv a real run spawns, so --dry-run can never drift from it. */
-function formatNpxCommand(args: string[]): string {
-  return `npx ${args.join(' ')}`
-}
-
-function formatSkillSelectionHelp(verb: SkillMutationVerb, skillNames: string[]): string {
-  return [
-    `Choose one or more skills to ${verb}:`,
-    ...skillNames.map((name) => `  ${name}`),
-    '',
-    `Usage: orca skills ${verb} --skill <name> [--skill <name> ...]`,
-    `   or: orca skills ${verb} --all`
-  ].join('\n')
 }
 
 function createSkillMutationHandler(verb: SkillMutationVerb): CommandHandler {
