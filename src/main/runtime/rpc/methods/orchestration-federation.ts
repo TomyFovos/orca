@@ -30,7 +30,12 @@ export function createOrchestrationFederationAttachMethods(
     name: 'orchestration.federationAttachStart',
     params: FederationAttachStartParams,
     handler: async (params, { runtime, orchestrationMutation }) => {
-      const { createsWorktree, agent, resolvedWorktree } = await validateFederatedAttachment({
+      const {
+        createsWorktree,
+        agent,
+        resolvedWorktree,
+        orchestrationMutation: validatedMutation
+      } = await validateFederatedAttachment({
         params,
         runtime,
         orchestrationMutation,
@@ -41,10 +46,10 @@ export function createOrchestrationFederationAttachMethods(
       db.createRemoteDispatchAttachment({
         dispatchId: params.dispatchId,
         taskId: params.taskId,
-        homePeerFingerprint: orchestrationMutation.callerFingerprint,
+        homePeerFingerprint: validatedMutation.callerFingerprint,
         protocolVersion: params.protocolVersion,
         runtimeEpoch: runtime.getRuntimeId(),
-        mutationReceipt: orchestrationMutation
+        mutationReceipt: validatedMutation
       })
       const effects: FederationEffect[] = []
       let failedStage = createsWorktree ? 'worktree_create' : 'worktree_resolve'

@@ -18,6 +18,7 @@ export type FederatedAttachmentValidation = {
   createsWorktree: boolean
   agent: string | undefined
   resolvedWorktree: Awaited<ReturnType<Runtime['showManagedWorktree']>> | undefined
+  orchestrationMutation: NonNullable<RpcContext['orchestrationMutation']>
 }
 
 export async function validateFederatedAttachment({
@@ -106,5 +107,5 @@ export async function validateFederatedAttachment({
       existingPlacement: 'an exact existing folder workspace'
     })
   }
-  return { createsWorktree, agent, resolvedWorktree }
+  return { createsWorktree, agent, resolvedWorktree, orchestrationMutation }
 }
