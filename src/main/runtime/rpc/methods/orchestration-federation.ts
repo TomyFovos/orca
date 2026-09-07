@@ -1,15 +1,11 @@
-import { isTuiAgent } from '../../../../shared/tui-agent-config'
 import type { TuiAgent } from '../../../../shared/types'
 import { buildDispatchPreamble } from '../../orchestration/preamble'
 import { OrchestrationError } from '../../orchestration/orchestration-error'
-import { assertManagedWorkerGitIsolated } from '../../managed-execution/managed-worker-git-isolation'
 import {
   getProcessRuntimeProfile,
-  MANAGED_ORCA_RUNTIME_PROFILE,
   type OrcaRuntimeProfile
 } from '../../runtime-profile'
 import { defineMethod, type RpcMethod } from '../core'
-import { assertOrchestrationWorktreeCreationSupported } from './orchestration-folder-worktree-placement'
 import {
   appendFederationSetupEffect,
   appendFederationTerminalEffects,
@@ -22,6 +18,7 @@ import {
   persistFederatedSetupSpawnFailure,
   persistFederatedSetupWaitOutcome
 } from './orchestration-federation-setup'
+import { validateFederatedAttachment } from './orchestration-federation-attach-validation'
 import { FederationAttachStartParams } from './orchestration-federation-start-schema'
 import { failFederatedAttachmentWithReceipt } from './orchestration-federation-start-receipt'
 
@@ -33,90 +30,26 @@ export function createOrchestrationFederationAttachMethods(
     name: 'orchestration.federationAttachStart',
     params: FederationAttachStartParams,
     handler: async (params, { runtime, orchestrationMutation }) => {
-      if (!orchestrationMutation) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          'Federated worker attachment requires a durable retry request.'
-        )
-      }
-      if (params.worktree === 'current' || params.worktree === 'new-child') {
-        throw new OrchestrationError(
-          'invalid_argument',
-          'A remote worker requires an exact existing worktree or new-top-level.'
-        )
-      }
-      const createsWorktree = params.worktree === 'new-top-level'
-      if (createsWorktree && (!params.name || !params.repo)) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          'A remote new-top-level worktree requires --name and an explicit --repo.'
-        )
-      }
-      if (createsWorktree && params.terminal) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          '--terminal cannot combine with remote new-worktree creation.'
-        )
-      }
-      if (
-        !createsWorktree &&
-        (params.name || params.repo || params.baseBranch || params.setup || params.setupSource)
-      ) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          'Creation and setup options apply only to remote new-top-level worktrees.'
-        )
-      }
-      if (params.terminal && params.agent) {
-        throw new OrchestrationError(
-          'invalid_argument',
-          '--terminal reuses an existing agent and cannot combine with --agent.'
-        )
-      }
-      const agent = params.agent
-      if (!params.terminal && (!agent || !isTuiAgent(agent))) {
-        throw new OrchestrationError(
-          'agent_unconfigured',
-          'A configured --agent is required when federated worker-start creates a terminal.'
-        )
-      }
-      if (agent) {
-        runtime.validateOrchestrationAgentLauncher(agent as TuiAgent)
-      }
-      let resolvedWorktree: Awaited<ReturnType<typeof runtime.showManagedWorktree>> | undefined
-      if (runtimeProfile() === MANAGED_ORCA_RUNTIME_PROFILE) {
-        // Why: a receiver cannot validate Git metadata on a remote connection; reject before
-        // accepting the attachment or creating any worktree/terminal side effect.
-        if (!createsWorktree) {
-          resolvedWorktree = await runtime.showManagedWorktree(params.worktree).catch(() => {
-            throw new OrchestrationError(
-              'worktree_not_found_on_server',
-              `Worktree ${params.worktree} was not found on the selected worker server.`
-            )
-          })
-        }
-        const repo = await runtime.showRepo(resolvedWorktree?.repoId ?? (params.repo as string))
-        assertManagedWorkerGitIsolated(
-          resolvedWorktree?.git?.path ?? repo.path,
-          repo.connectionId ? { hostUnvalidatable: true } : undefined
-        )
-      }
-      if (createsWorktree) {
-        await assertOrchestrationWorktreeCreationSupported({
-          runtime,
-          repoSelector: params.repo as string,
-          existingPlacement: 'an exact existing folder workspace'
-        })
-      }
+      const {
+        createsWorktree,
+        agent,
+        resolvedWorktree,
+        orchestrationMutation: validatedMutation
+      } = await validateFederatedAttachment({
+        params,
+        runtime,
+        orchestrationMutation,
+        runtimeProfile
+      })
 
       const db = runtime.getOrchestrationDb()
       db.createRemoteDispatchAttachment({
         dispatchId: params.dispatchId,
         taskId: params.taskId,
-        homePeerFingerprint: orchestrationMutation.callerFingerprint,
+        homePeerFingerprint: validatedMutation.callerFingerprint,
         protocolVersion: params.protocolVersion,
         runtimeEpoch: runtime.getRuntimeId(),
-        mutationReceipt: orchestrationMutation
+        mutationReceipt: validatedMutation
       })
       const effects: FederationEffect[] = []
       let failedStage = createsWorktree ? 'worktree_create' : 'worktree_resolve'

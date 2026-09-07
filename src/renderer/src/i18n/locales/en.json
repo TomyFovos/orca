@@ -579,7 +579,13 @@
           "error": {
             "format": {
               "37cf0bc991": "Orca could not resolve a usable base ref for this workspace.",
-              "64555d0014": "No base branch found"
+              "64555d0014": "No base branch found",
+              "ff2b821af1": "Managed worktree root is not configured",
+              "39520a53db": "Managed profile requires a dedicated worktree root before it can create a workspace.",
+              "82680fa258": "Managed worktree root is unreachable",
+              "3721431a3d": "The isolated worker cannot reach the configured managed worktree root.",
+              "210a8e318d": "Managed worktree placement is unavailable",
+              "da8f17a168": "Orca could not validate a safe managed worktree location."
             }
           }
         }

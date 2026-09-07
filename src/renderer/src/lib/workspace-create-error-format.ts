@@ -18,21 +18,38 @@ function formatManagedWorktreePlacementError(
   switch (error.data.code) {
     case 'unset':
       return {
-        title: 'Managed worktree root is not configured',
-        message:
-          'Managed profile requires a dedicated worktree root before it can create a workspace.',
+        title: translate(
+          'auto.lib.workspace.create.error.format.ff2b821af1',
+          'Managed worktree root is not configured'
+        ),
+        message: translate(
+          'auto.lib.workspace.create.error.format.39520a53db',
+          'Managed profile requires a dedicated worktree root before it can create a workspace.'
+        ),
         help: 'Set ORCA_MANAGED_WORKTREE_ROOT to an absolute, reachable directory, then retry.'
       }
     case 'not_traversable':
       return {
-        title: 'Managed worktree root is unreachable',
-        message: 'The isolated worker cannot reach the configured managed worktree root.',
+        title: translate(
+          'auto.lib.workspace.create.error.format.82680fa258',
+          'Managed worktree root is unreachable'
+        ),
+        message: translate(
+          'auto.lib.workspace.create.error.format.3721431a3d',
+          'The isolated worker cannot reach the configured managed worktree root.'
+        ),
         help: 'Choose a root whose ancestors are world-traversable; do not loosen permissions, then retry.'
       }
     default:
       return {
-        title: 'Managed worktree placement is unavailable',
-        message: 'Orca could not validate a safe managed worktree location.',
+        title: translate(
+          'auto.lib.workspace.create.error.format.210a8e318d',
+          'Managed worktree placement is unavailable'
+        ),
+        message: translate(
+          'auto.lib.workspace.create.error.format.da8f17a168',
+          'Orca could not validate a safe managed worktree location.'
+        ),
         help: 'Review the managed worktree root configuration, then retry.'
       }
   }
