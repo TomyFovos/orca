@@ -62,3 +62,16 @@ Source-control and review changes must consider GitLab and other supported git p
 ## GitHub CLI Usage
 
 Be mindful of the user's `gh` CLI API rate limit — batch requests where possible and avoid unnecessary calls. All code, commands, and scripts must be compatible with macOS, Linux, and Windows.
+
+## Issue Close前の General-Management 同期
+
+IssueをCloseする前、またはIssueをCloseするPRを完了扱いにする前に、sibling repository の `../General-Management` を最新化する。
+
+- 対象Issueで確定・実装された変更を General-Management の LikeC4 (`architecture/src/`) に反映する。
+- 主要Component、責務、Relation、Repository間の接点、重要な処理フロー、および `実装済み / 設計確定 / 将来構想` の状態を実態に合わせる。
+- 通常は対象Repositoryの詳細Viewを更新し、上位概念そのものが変わった場合だけ全体概念図を変更する。
+- LikeC4変更後はvalidate / buildを可能な範囲で実行する。
+- General-Managementの変更はcommit / pushまで完了し、remoteへ反映されたことを確認する。
+- `../General-Management` が存在しない、または更新Authority / accessがない場合は黙ってCloseせず、未完了条件として報告する。
+
+General-Managementの最新化が完了するまで、対象Issueを完了扱いにしない。
