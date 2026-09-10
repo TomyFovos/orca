@@ -18,7 +18,8 @@ permissions:
 jobs:
   static_analysis:
     name: static analysis
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -95,7 +96,8 @@ jobs:
 
   root_directory_guard:
     name: root directory guard
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -111,7 +113,8 @@ jobs:
         run: bash .github/scripts/check-root-directory-entries.sh "$BASE_SHA" "$HEAD_SHA"
 
   typecheck:
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -125,7 +128,8 @@ jobs:
 
   git_compatibility:
     name: Git compatibility
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -175,7 +179,8 @@ jobs:
 
   shell_contracts:
     name: shell contracts
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -202,7 +207,8 @@ jobs:
 
   test:
     name: tests node ${{ matrix.node }} ${{ matrix.shard }}/${{ matrix.shard_total }}
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
     strategy:
       fail-fast: false
       matrix:
@@ -237,7 +243,8 @@ jobs:
 
   package:
     name: package
-    runs-on: ubuntu-latest
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       - name: Checkout
@@ -295,6 +302,10 @@ jobs:
 
   package_windows:
     name: package (windows)
+    # Windows packaging remains covered for the canonical repository.  The
+    # fork has no Windows self-hosted runner, so skip this hosted job there to
+    # avoid charging automatic fork PRs; maintainers can run it upstream.
+    if: github.repository == 'stablyai/orca' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: windows-2022
     timeout-minutes: 30
 
@@ -346,8 +357,8 @@ jobs:
   # release runs retain full-suite coverage.
   e2e-paths:
     name: detect changed e2e specs
-    runs-on: ubuntu-latest
-    if: github.event.pull_request.draft != true
+    runs-on: [self-hosted, Linux, X64]
+    if: github.event.pull_request.draft != true && github.event.pull_request.head.repo.full_name == github.repository
     # Why: detector only needs to read the checkout; do not inherit repo defaults.
     permissions:
       contents: read
@@ -391,7 +402,7 @@ jobs:
       test_files: ${{ needs.e2e-paths.outputs.test_files }}
 
   verify:
-    if: always()
+    if: always() && github.event.pull_request.head.repo.full_name == github.repository
     needs:
       - static_analysis
       - root_directory_guard
@@ -401,7 +412,9 @@ jobs:
       - test
       - package
       - package_windows
-    runs-on: ubuntu-latest
+    # Keep the required PR gate on the fork's dedicated runner.  This job only
+    # evaluates dependency results and does not require a hosted image.
+    runs-on: [self-hosted, Linux, X64]
 
     steps:
       # Why: e2e is deliberately absent from needs. The suite is currently red on
@@ -430,9 +443,14 @@ jobs:
             "$GIT_COMPATIBILITY" \
             "$SHELL_CONTRACTS" \
             "$TEST" \
-            "$PACKAGE" \
-            "$PACKAGE_WINDOWS"; do
+            "$PACKAGE"; do
             if [ "$result" != "success" ]; then
               exit 1
             fi
           done
+          # package_windows is intentionally skipped on the fork because no
+          # Windows self-hosted runner is available there; it remains required
+          # for canonical upstream runs.
+          if [ "$PACKAGE_WINDOWS" != "success" ] && [ "$PACKAGE_WINDOWS" != "skipped" ]; then
+            exit 1
+          fi
