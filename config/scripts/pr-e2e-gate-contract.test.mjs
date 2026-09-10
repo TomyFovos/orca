@@ -41,15 +41,20 @@ describe('PR E2E gate contract', () => {
     expect(prWorkflow.jobs.e2e.with.test_files).toBe('${{ needs.e2e-paths.outputs.test_files }}')
   })
 
-  it('enforces every job verify depends on', () => {
-    // Why: derive from verify.needs rather than hardcoding, so adding a required
-    // job without adding it to the strict loop fails here instead of silently
-    // leaving that job unenforced. This is what caught GIT_COMPATIBILITY and
-    // SHELL_CONTRACTS being absent from an earlier hardcoded list.
+  it('enforces required jobs and handles optional Windows packaging', () => {
+    // Why: derive required checks from verify.needs while allowing upstream-only
+    // Windows packaging to skip on the fork.
     const strictLoop = verifyStep.run.slice(0, verifyStep.run.indexOf('done'))
     for (const job of prWorkflow.jobs.verify.needs) {
       const envVar = job.toUpperCase()
       expect(verifyStep.env[envVar]).toBe(`\${{ needs.${job}.result }}`)
+
+      if (job === 'package_windows') {
+        expect(verifyStep.run).toContain(`"$${envVar}" != "success"`)
+        expect(verifyStep.run).toContain(`"$${envVar}" != "skipped"`)
+        continue
+      }
+
       expect(strictLoop).toContain(`"$${envVar}"`)
     }
   })
