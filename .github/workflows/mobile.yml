@@ -15,7 +15,10 @@ on:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # External fork PRs must not execute on a persistent runner. The canonical
+    # fork uses github-runner-orca; upstream keeps its hosted Linux coverage.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ github.repository == 'TomyFovos/orca' && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
 
     defaults:
       run:

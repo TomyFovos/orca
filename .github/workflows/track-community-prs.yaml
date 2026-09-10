@@ -15,6 +15,9 @@ permissions:
 
 jobs:
   track-community-pr:
+    # This job mints stablyai's GitHub App token and therefore remains
+    # upstream-only. The fork skips it to avoid hosted billing and secret use.
+    if: github.repository == 'stablyai/orca'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

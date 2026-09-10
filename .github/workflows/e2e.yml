@@ -17,6 +17,11 @@ on:
         description: JSON array of changed specs; empty runs the full suite
         required: false
         type: string
+      self_hosted:
+        description: Use the caller's dedicated Linux runner for canonical PR checks
+        required: false
+        default: false
+        type: boolean
   workflow_dispatch:
     inputs:
       ref:
@@ -31,7 +36,7 @@ on:
 jobs:
   build:
     name: build e2e app
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.self_hosted && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     timeout-minutes: 10
 
     steps:
@@ -89,7 +94,7 @@ jobs:
     name: e2e ${{ matrix.shard_name }}
     needs: build
     if: inputs.test_files == ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.self_hosted && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -148,8 +153,8 @@ jobs:
       # job, so it needs the same pinned node-gyp override to avoid pnpm's
       # broken bundled gyp_main.py on Linux. Gate on runner.os matches
       # release.yml so the invariant "this workaround is Linux-only" is
-      # consistent across all three workflows, even though this job
-      # currently pins runs-on: ubuntu-latest.
+      # consistent across all three workflows. Scheduled/manual runs default
+      # to ubuntu-latest; canonical PR callers opt into the dedicated runner.
       - name: Use external node-gyp to avoid pnpm's bundled copy (Linux only)
         if: runner.os == 'Linux'
         run: |
@@ -192,7 +197,7 @@ jobs:
     name: changed e2e specs
     needs: build
     if: inputs.test_files != ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.self_hosted && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     timeout-minutes: 30
 
     steps:
@@ -249,7 +254,7 @@ jobs:
     name: ssh docker watcher isolation
     needs: build
     if: inputs.test_files == ''
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.self_hosted && fromJSON('["self-hosted","Linux","X64"]') || 'ubuntu-latest' }}
     # Why 35: the terminal parking + retention specs below add two more
     # docker-rig tests capped at 240s each on top of the watcher isolation pair.
     timeout-minutes: 35
@@ -274,7 +279,7 @@ jobs:
           run_install: false
 
       # Why: same Linux-only node-gyp pin as build/e2e jobs so the workaround
-      # stays consistent across workflows even while this job is ubuntu-latest.
+      # stays consistent across workflows on either runner image.
       - name: Use external node-gyp to avoid pnpm's bundled copy (Linux only)
         if: runner.os == 'Linux'
         run: |
